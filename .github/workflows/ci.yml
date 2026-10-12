@@ -1,0 +1,21 @@
+name: kit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pyyaml pytest pytest-cov hypothesis ruff mypy types-PyYAML
+      - run: ruff check .
+      - run: mypy minion_process
+      - run: python -m pytest -q --cov=minion_process --cov-fail-under=100
+      - run: python -m minion_process profile validate profiles/example.profile.yaml
+      - run: python -m minion_process profile validate profiles/minion-agent.profile.yaml

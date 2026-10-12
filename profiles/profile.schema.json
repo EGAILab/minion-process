@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/EGAILab/minion-process/profiles/profile.schema.json",
+  "title": "Minion-Process profile",
+  "description": "The one project-specific process file. Validated offline by `minion-process profile validate`; `minion_process/profile.py` implements exactly these rules.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kit", "project", "authority", "repos", "coordination", "agents", "delegation"],
+  "properties": {
+    "kit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "source"],
+      "properties": {
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "source": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"}
+      }
+    },
+    "project": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "authority": {
+      "description": "Semantic authority chain, highest first.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "anyOf": [{"required": ["path"]}, {"required": ["pin"]}],
+        "properties": {
+          "kind": {"enum": ["source", "bundle", "manifest", "spec", "conformance", "design", "register"]},
+          "name": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "pin": {"type": "string", "minLength": 1},
+          "verify": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "repos": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "default_branch"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "default_branch": {"type": "string", "minLength": 1},
+          "github": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"}
+        }
+      }
+    },
+    "coordination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend"],
+      "properties": {
+        "backend": {"enum": ["github-issue", "state-file"]},
+        "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "path": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"backend": {"const": "github-issue"}}}, "then": {"required": ["repo"]}},
+        {"if": {"properties": {"backend": {"const": "state-file"}}}, "then": {"required": ["path"]}}
+      ]
+    },
+    "agents": {
+      "description": "At least two agents; at least one coordinator, one reviewer and one implementer; a reviewer that does not also hold shared-contract-owner.",
+      "type": "object",
+      "minProperties": 2,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["roles", "harness"],
+        "properties": {
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^(coordinator|shared-contract-owner|reviewer|implementer:[a-z][a-z0-9+-]*)$"}
+          },
+          "harness": {"type": "string", "minLength": 1},
+          "default_pane": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "taxonomy_aliases": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Z][A-Z0-9_]*$"},
+      "additionalProperties": {
+        "enum": ["AUTHORITY_BEHAVIOR_UNCERTAIN", "AUTHORITY_PARITY_DEFECT", "CONTRACT_ASSURANCE_DEFECT", "PARITY_NEUTRAL_HARDENING", "PARITY_CONSTRAINED_RISK"]
+      }
+    },
+    "hazard_families": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "gates": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["launcher", "tiers"],
+        "properties": {
+          "launcher": {"type": "string", "minLength": 1},
+          "tiers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["g0", "g1", "g2", "g3"]}}
+        }
+      }
+    },
+    "delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "routing"],
+      "properties": {
+        "source": {"type": "string", "minLength": 1},
+        "routing": {"type": "boolean"}
+      }
+    },
+    "wp_kinds_enabled": {"type": "array", "uniqueItems": true, "items": {"enum": ["semantic", "delta", "process", "scoping", "status"]}},
+    "implementation_order": {
+      "description": "Languages in the order the workflow's implementation states apply to them (first = the shared-contract side). Each must have an implementer.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9+-]*$"}
+    },
+    "environment": {"type": "string", "minLength": 1}
+  }
+}
