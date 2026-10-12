@@ -13,7 +13,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install --upgrade pip pyyaml pytest pytest-cov hypothesis jsonschema ruff mypy types-PyYAML
+      # Runtime and test dependencies come from pyproject.toml, never from a list kept here (PROC-KIT-P3-R005).
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[test]"
+      - run: python -m pip check
       - run: ruff check .
       - run: mypy minion_process
       - run: python -m pytest -q --cov=minion_process --cov-fail-under=100
