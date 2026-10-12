@@ -64,6 +64,75 @@ def _process_closure(old: dict[str, Any], new: dict[str, Any]) -> str | None:
     return None
 
 
+INTAKE_EXEMPT = frozenset(
+    {"SCOPING", "BLOCKED_FOR_OWNER", "WAITING_FOR_TRIGGER", "INCIDENT", "INVALID_UNAUTHORIZED"}
+)
+"""Leaving SCOPING for any state outside this set is intake: the WP must be classified first."""
+
+
+def classification_guard(old: dict[str, Any], new: dict[str, Any]) -> str | None:
+    """Kind and consequence class across a transition (`coordination-state.md` §14, kit 0.2.0):
+
+    - **Intake.** A WP leaving `SCOPING` for an active working state records `kind` and
+      `consequence.class` (with its predicate rule) in the intended state.
+    - **Kind is fixed after intake.** A different kind is a new WP, not a patch (scope corrections stay
+      ordinary checked changes to `requirements`, within the kind's rule).
+    - **Downgrade is Owner-only** (`minion-agent#75` Amendment 2, item 11): governing -> mechanical needs
+      `consequence.downgrade` with the Owner decision and the consenting reviewer, and a recorded
+      `governance_source`. The tool checks presence; the agent validates the source (§11.10).
+    - **Closure routes by kind.** `FINAL_CONTRACT_REVIEW -> CLOSED` (§10.2) is for `process`/`status`
+      kinds; `SCOPING -> CLOSED` (§10.3) is for `scoping`. A semantic or delta WP closes through
+      `CLOSURE_REVIEW` only."""
+    old_status, new_status = old["status"], new["status"]
+    kind_old, kind_new = old.get("kind"), new.get("kind")
+    class_old = (
+        (old.get("consequence") or {}).get("class") if isinstance(old.get("consequence"), dict) else None
+    )
+    class_new = (
+        (new.get("consequence") or {}).get("class") if isinstance(new.get("consequence"), dict) else None
+    )
+    lean = new.get("schema_version", 1) >= 2  # v1 (pre-lean) states are legacy; intake applies from v2
+    if (
+        lean
+        and old_status == "SCOPING"
+        and new_status not in INTAKE_EXEMPT
+        and (kind_new is None or class_new is None)
+    ):
+        return (
+            "intake requires classification: record `kind` and `consequence: {class, rule}` before leaving "
+            "SCOPING (§14; consequence-classes.md)"
+        )
+    if kind_old is not None and kind_new != kind_old and old_status != "SCOPING":
+        return f"kind is fixed after intake ({kind_old}); a different kind is a new work package (§14)"
+    if class_old == "governing" and class_new == "mechanical":
+        downgrade = (new.get("consequence") or {}).get("downgrade")
+        source = new.get("governance_source")
+        if not (
+            isinstance(downgrade, dict) and downgrade.get("owner_decision") and downgrade.get("reviewer")
+        ):
+            return (
+                "consequence-class downgrade is Owner-only (#75 Amendment 2 item 11): record "
+                "consequence.downgrade {owner_decision, reviewer}"
+            )
+        if not source or (isinstance(source, dict) and not any(source.values())):
+            return "consequence-class downgrade requires a recorded governance_source (§11.10)"
+    if (
+        old_status == "FINAL_CONTRACT_REVIEW"
+        and new_status == "CLOSED"
+        and kind_new not in (None, "process", "status")
+    ):
+        return (
+            f"FINAL_CONTRACT_REVIEW -> CLOSED is the process-only route; a {kind_new} WP closes through "
+            "CLOSURE_REVIEW (§10.2, §14)"
+        )
+    if old_status == "SCOPING" and new_status == "CLOSED" and kind_new not in (None, "scoping"):
+        return (
+            f"SCOPING -> CLOSED is the scoping-only route; a {kind_new} WP does not close from SCOPING "
+            "(§10.3, §14)"
+        )
+    return None
+
+
 SCOPING_REVIEW_APPROVED = "APPROVED"
 """The one machine-checkable approval outcome for `scoping_review.outcome` (§10.3)."""
 
@@ -160,6 +229,7 @@ def commit_state(
         raise CheckFailed(f"patch changed keys outside ALLOWED: {outside}")
     reason = (
         check_transition(old["status"], new_workflow["status"])
+        or classification_guard(old, new_workflow)
         or _process_closure(old, new_workflow)
         or _scoping_closure(gh, old, new_workflow)
     )

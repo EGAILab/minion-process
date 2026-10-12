@@ -11,7 +11,9 @@ workflow:
   work_package: <WP id>
   title: '<title>'
   status: SCOPING
-  requirements: [<requirement ids>]          # [] for a process-only or scoping-only WP
+  kind: <semantic | delta | process | scoping | status>      # recorded at intake (consequence-classes.md)
+  consequence: {class: <governing | mechanical>, rule: <CP-0..CP-6>}
+  requirements: [<requirement ids>]          # [] for a process, scoping or status WP
   current_candidate: {}                      # code: {pr, sha, base}  docs: {pr, sha, base}
   dependencies: {}                           # <WP>: {issue, relation: blocked_by|independent_of|shares_artifact}
   open_findings: []
