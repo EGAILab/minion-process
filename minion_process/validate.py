@@ -28,6 +28,22 @@ LEAN_BODY_CHARS = 8000
 HISTORY_KEYS = ("remediations", "reviews", "review_history", "history_log")
 """Keys that carry history rather than current state (`coordination-state.md` §13)."""
 
+KINDS = ("semantic", "delta", "process", "scoping", "status")
+"""Work-package kinds (`coordination-state.md` §14, kit 0.2.0; Owner decision 2 of 2026-10-11)."""
+CLASSES = ("governing", "mechanical")
+"""Consequence classes (`consequence-classes.md`). The class, not the kind, selects the route."""
+GOVERNING_KINDS = frozenset({"semantic", "delta"})
+"""Kinds that are governing by definition."""
+SCOPE_FREE_KINDS = frozenset({"process", "scoping", "status"})
+"""Kinds with no product requirement: `requirements` must be an explicit `[]`."""
+SCOPING_STATES = frozenset({"SCOPING", "BLOCKED_FOR_OWNER", "CLOSED", "INCIDENT", "INVALID_UNAUTHORIZED"})
+"""The only states a `scoping` WP may be in (`coordination-state.md` §10.3)."""
+PREDICATE_ID = re.compile(r"^CP-[0-6]$")
+"""A consequence predicate id: CP-0 (none applies) or CP-1..CP-6 (`consequence-classes.md`)."""
+SKIP_RULE = re.compile(r"^SK-[0-9]+$")
+ROUTE_RULE = re.compile(r"^RT-[1-6]$")
+"""A delegated route id (`routing.md`; `minion-agent#75` Amendment 2)."""
+
 
 @dataclass(frozen=True)
 class Problem:
@@ -150,6 +166,7 @@ def validate_workflow(workflow: Any, body_chars: int | None = None) -> list[Prob
 
     if lean:
         _lean_extras(c, workflow)
+    _classification(c, workflow, status, lean)
 
     for key in HISTORY_KEYS:
         if key in workflow or any(isinstance(v, dict) and key in v for v in workflow.values()):
@@ -279,6 +296,148 @@ def _lean_extras(c: _Checker, workflow: dict[str, Any]) -> None:
             c.error("history", "must be a mapping")
         elif history.get("assurance_index") is not None and not isinstance(history["assurance_index"], str):
             c.error("history.assurance_index", "must be a string")
+
+
+def _classification(c: _Checker, workflow: dict[str, Any], status: str, lean: bool) -> None:
+    """`kind`, `consequence`, `skipped` and `history.routes` (`coordination-state.md` §14, kit 0.2.0).
+
+    All four are optional in the state shape, so work packages opened before kit 0.2.0 stay valid; the
+    `apply` guard (`ops.classification_guard`) requires `kind` and `consequence` from intake on. Presence
+    is decided by the key, not by truthiness: a supplied `null` is a malformed value and an error, never
+    absence (`PROC-KIT-P2-R002`)."""
+    kind: Any = None
+    if "kind" in workflow:
+        kind = workflow["kind"]
+        if not (isinstance(kind, str) and kind in KINDS):
+            c.error("kind", f"must be one of {', '.join(KINDS)}, got {kind!r}")
+            kind = None
+    klass: str | None = None
+    if "consequence" in workflow:
+        consequence = workflow["consequence"]
+        if not isinstance(consequence, dict):
+            c.error("consequence", f"must be a mapping, got {type(consequence).__name__}")
+        else:
+            klass = _consequence(c, consequence)
+    if "classification_pending" in workflow:
+        pending = workflow["classification_pending"]
+        if not isinstance(pending, bool):
+            c.error("classification_pending", f"must be a boolean, got {pending!r}")
+        elif pending and ("kind" in workflow or "consequence" in workflow):
+            c.error(
+                "classification_pending", "a classified WP is not pending classification; drop the flag (§14)"
+            )
+    if lean and "kind" not in workflow and "consequence" not in workflow:
+        c.warn("kind", "kind and consequence not recorded; kit 0.2.0 classifies every WP at intake (§14)")
+
+    if kind in GOVERNING_KINDS and klass == "mechanical":
+        c.error("consequence.class", f"a {kind} WP is governing by definition (§14)")
+    if kind in SCOPE_FREE_KINDS and workflow.get("requirements") not in ([], None):
+        c.error("requirements", f"a {kind} WP owns no product requirement: requirements must be [] (§14)")
+    if kind in GOVERNING_KINDS and workflow.get("requirements") == []:
+        c.error("requirements", f"a {kind} WP owns product requirements: requirements must not be [] (§14)")
+    if kind == "scoping" and status not in SCOPING_STATES:
+        c.error("status", f"a scoping WP never enters {status}; it closes from SCOPING (§10.3, §14)")
+    if klass == "mechanical" and status == "CONTRACT_CONVERGENCE":
+        c.error(
+            "consequence.class",
+            "a mechanical WP has no convergence; a firing trigger upgrades the class (§14)",
+        )
+
+    if "skipped" in workflow:
+        skipped = workflow["skipped"]
+        if not isinstance(skipped, list):
+            c.error("skipped", "must be a list of {stage, rule, measured_rows, reviewer}")
+        else:
+            if skipped and klass != "mechanical":
+                c.error(
+                    "skipped",
+                    "a stage is skipped only on a WP classified mechanical; never on a governing or "
+                    "unclassified one (§14, record §6.3)",
+                )
+            for i, entry in enumerate(skipped):
+                _skip(c, f"skipped[{i}]", entry)
+
+    history = workflow.get("history")
+    if isinstance(history, dict) and "routes" in history:
+        routes = history["routes"]
+        if not isinstance(routes, list):
+            c.error("history.routes", "must be a list of {rule, at, reason}")
+        else:
+            for i, entry in enumerate(routes):
+                _route(c, f"history.routes[{i}]", entry)
+
+
+def _consequence(c: _Checker, consequence: dict[str, Any]) -> str | None:
+    klass = consequence.get("class")
+    if not (isinstance(klass, str) and klass in CLASSES):
+        c.error("consequence.class", f"must be one of {', '.join(CLASSES)}, got {klass!r}")
+        klass = None
+    rule = consequence.get("rule")
+    if not (isinstance(rule, str) and (PREDICATE_ID.match(rule) or _finding_id(rule))):
+        c.error(
+            "consequence.rule", f"must be a predicate id CP-0..CP-6 or the upgrading finding ID, got {rule!r}"
+        )
+    elif klass == "mechanical" and not PREDICATE_ID.match(rule):
+        c.error(
+            "consequence.rule", "a finding ID as rule records an upgrade; the class is then governing (§14)"
+        )
+    elif klass == "mechanical" and rule != "CP-0":
+        c.error("consequence.rule", f"{rule} is a governing predicate; a mechanical WP records CP-0 (§14)")
+    elif klass == "governing" and rule == "CP-0":
+        c.error(
+            "consequence.rule",
+            "CP-0 means no predicate applies; a governing WP names its predicate or finding",
+        )
+    for key in ("confirmed_by",):
+        if key in consequence and not _text(consequence[key]):
+            c.error(f"consequence.{key}", "must be a non-empty string")
+    if "upgraded_by" in consequence:
+        c.id_list("consequence.upgraded_by", consequence["upgraded_by"], _finding_id, "finding ID string")
+    if "downgrade" in consequence:
+        downgrade = consequence["downgrade"]
+        if not isinstance(downgrade, dict):
+            c.error("consequence.downgrade", "must be a mapping {owner_decision, reviewer}")
+        else:
+            for key in ("owner_decision", "reviewer"):
+                if not _text(downgrade.get(key)):
+                    c.error(f"consequence.downgrade.{key}", "required non-empty string (Owner-only item 11)")
+    extra = sorted(set(consequence) - {"class", "rule", "confirmed_by", "upgraded_by", "downgrade"})
+    if extra:
+        c.error("consequence", f"unknown keys {extra}")
+    return klass
+
+
+def _skip(c: _Checker, path: str, entry: Any) -> None:
+    if not isinstance(entry, dict):
+        c.error(path, "must be a mapping {stage, rule, measured_rows, reviewer}")
+        return
+    if not _text(entry.get("stage")):
+        c.error(f"{path}.stage", "required non-empty string")
+    elif entry["stage"] == "FINAL_CONTRACT_REVIEW":
+        c.error(f"{path}.stage", "the final complete review is never skipped (§14, record §6.3)")
+    rule = entry.get("rule")
+    if not (isinstance(rule, str) and SKIP_RULE.match(rule)):
+        c.error(f"{path}.rule", f"must be a skip rule id SK-n, got {rule!r}")
+    rows = entry.get("measured_rows")
+    if not (isinstance(rows, list) and rows and all(_text(r) for r in rows)):
+        c.error(
+            f"{path}.measured_rows",
+            "required non-empty list of feasibility rows measured against the authority",
+        )
+    if not _text(entry.get("reviewer")):
+        c.error(f"{path}.reviewer", "required: the reviewer who consented to the skip in a review record")
+
+
+def _route(c: _Checker, path: str, entry: Any) -> None:
+    if not isinstance(entry, dict):
+        c.error(path, "must be a mapping {rule, at, reason}")
+        return
+    rule = entry.get("rule")
+    if not (isinstance(rule, str) and ROUTE_RULE.match(rule)):
+        c.error(f"{path}.rule", f"must be a delegated route id RT-1..RT-6, got {rule!r}")
+    for key in ("at", "reason"):
+        if not _text(entry.get(key)):
+            c.error(f"{path}.{key}", "required non-empty string")
 
 
 def errors(problems: list[Problem]) -> list[Problem]:

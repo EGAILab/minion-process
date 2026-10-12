@@ -8,6 +8,8 @@ REVIEWER ROLE       <agent / pane>, independent of the author
 REVIEWED            code: PR #<n> @ <40-hex>   docs: PR #<n> @ <40-hex>
 AUTHORITY           <pinned authority identity>
 SCOPE               complete | targeted (<finding ids> + touched dependencies + affected regressions)
+CLASS CONFIRMATION  <kind> / <governing | mechanical>, <CP-n> CONFIRMED | CORRECTED to <class>, <rule> -- required line
+                    of the first independent review (consequence-classes.md "Who classifies")
 VERDICT             APPROVED | CHANGES REQUESTED | HANDOFF_BLOCKED (<missing capability>)
 NEXT TRANSITION     <state> -> <state>, next_owner <agent>
 ```

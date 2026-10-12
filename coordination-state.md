@@ -737,3 +737,68 @@ A state block is loaded as a **graph**, not just parsed:
 
   Explicit tags still construct their types, and L2′ then rejects the non-JSON ones.
 - **L4 (symmetry).** Writes are checked with the same loader: a state that would not read back unchanged is never written.
+
+---
+
+## 14. Kind, consequence class, stage skips and routes (kit 0.2.0, normative)
+
+Owner decisions 2 and 3 of 2026-10-11 (`minion-agent#205`) and `minion-agent#75` Amendment 2. Rules in
+`consequence-classes.md` and `routing.md`; enforced by `minion-process validate` and the `apply` guard.
+
+```yaml
+workflow:
+  kind: process                           # semantic | delta | process | scoping | status
+  consequence:
+    class: mechanical                     # governing | mechanical
+    rule: CP-0                            # CP-0 (none applies) | CP-1..CP-6 | the upgrading finding ID
+    confirmed_by: Codex                   # the first independent review confirms or corrects the class
+    upgraded_by: [PROC-X-R003]            # findings that matched a predicate (automatic upgrade)
+    downgrade: {owner_decision: "...", reviewer: Codex}   # Owner-only (#75 item 11); needs governance_source
+  skipped:                                # measured stage skips only (consequence-classes.md)
+    - {stage: IMPLEMENTATION_REVIEW, rule: SK-1, measured_rows: [F1.-0, F1.inf], reviewer: Codex}
+  history:
+    routes: [{rule: RT-2, at: "2026-10-12", reason: "WP-B idle while Codex reviews WP-A"}]
+```
+
+### 14.1 Shape rules (validator)
+
+- `kind` ∈ the five kinds. `consequence` is a mapping with `class` ∈ {governing, mechanical} and `rule` a
+  predicate id `CP-0`–`CP-6` or a finding ID; `CP-0` only with `mechanical`; a `CP-1..6` or finding rule
+  only with `governing`. `confirmed_by` non-empty string; `upgraded_by` a list of finding IDs; `downgrade`
+  a mapping with non-empty `owner_decision` and `reviewer`. Unknown keys are errors.
+- `semantic` and `delta` are governing by definition. `process`, `scoping` and `status` carry
+  `requirements: []`; `semantic` and `delta` carry a non-empty list.
+- A `scoping` WP is only ever in `SCOPING`, `BLOCKED_FOR_OWNER`, `CLOSED`, `INCIDENT` or
+  `INVALID_UNAUTHORIZED` (§10.3).
+- A `mechanical` WP is never in `CONTRACT_CONVERGENCE`: a firing trigger upgrades the class first.
+- `skipped` entries name a stage (never `FINAL_CONTRACT_REVIEW`), a rule `SK-n`, non-empty
+  `measured_rows` and the consenting `reviewer`; a governing WP has no skipped stage.
+- `history.routes` entries name a rule `RT-1`–`RT-6`, `at` and `reason`.
+- All four fields are optional in the shape, so WPs opened before kit 0.2.0 stay valid; a v2 state
+  without `kind`/`consequence` draws a warning. **Presence is decided by the key**: a supplied `null`
+  in any of these positions is a malformed value and an error, never absence (`PROC-KIT-P2-R002`).
+- `classification_pending: true` marks a new WP that paused (`BLOCKED_FOR_OWNER`, `WAITING_FOR_TRIGGER`)
+  before intake; it is a boolean and never coexists with `kind`/`consequence`.
+- A stage is skipped only on a WP classified `mechanical`; an unclassified or governing WP has no
+  `skipped` entries.
+
+### 14.2 Transition rules (`apply` guard)
+
+- **Intake.** Leaving `SCOPING` for an active working state requires `kind` and `consequence` in the
+  intended state. Leaving `SCOPING` unclassified for a pause state requires `classification_pending:
+  true`; a WP carrying that flag cannot enter a working state until classified, and cannot drop the
+  flag while unclassified (`PROC-KIT-P2-R003`).
+- **Classification is sticky.** Once recorded, `kind` and `consequence` are never removed or nulled;
+  any effective lowering from `governing` (to `mechanical` or to absent) is the Owner-only downgrade
+  (`PROC-KIT-P2-R001`).
+- **No schema rollback.** `schema_version` never decreases in an ordinary `apply`; the intake
+  obligation is computed from the higher of the current and intended versions, so a new v2 record
+  cannot be retagged as legacy v1 to escape intake (`PROC-KIT-P2-R003`, refined). A genuine v1 record
+  may be upgraded to v2 and takes the v2 rules from then on.
+- **Kind is fixed after intake.** A different kind is a new WP.
+- **Downgrade is Owner-only.** governing → mechanical requires `consequence.downgrade` and a recorded
+  `governance_source`; the tool checks presence, the agent validates the source (§11.10).
+- **Closure by kind.** `FINAL_CONTRACT_REVIEW -> CLOSED` (§10.2) only for `process`/`status`;
+  `SCOPING -> CLOSED` (§10.3) only for `scoping`; `semantic`/`delta` close through `CLOSURE_REVIEW`.
+- Existing §10.2/§10.3 checks (explicit `[]`, no open findings, merged candidates, approved scoping
+  review) are unchanged and run after this guard.

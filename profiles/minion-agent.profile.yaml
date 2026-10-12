@@ -1,7 +1,7 @@
 # Minion-Agent profile (first consumer): the kit's reference copy, validated in the kit's CI.
 # Intended live location on future adoption: minion-agent-docs/process/profile.yaml (no such file exists
 # until Minion-Agent's own reviewed adoption PR; this file does not imply present adoption).
-kit: {version: "0.1.0", source: EGAILab/minion-process}
+kit: {version: "0.2.0", source: EGAILab/minion-process}
 project: minion-agent
 
 authority:                                # agent-workflow.md section 3: adopted Pi source -> parity manifest -> spec -> conformance
@@ -38,6 +38,6 @@ gates:                                    # free-text until the kit launchers la
   python: {launcher: "minion-agent-python: eval build.sh --env; pytest, coverage 100%, ruff, mypy, schema + manifest validation, canonical suites (pinned ICU)", tiers: [g0, g1, g2, g3]}
   rust:   {launcher: ".agents/gate-preflight.ps1 then cargo fmt/clippy/test/doc, xtask conformance verify (CARGO_BUILD_JOBS=4, shared target per platform)", tiers: [g0, g1, g2, g3]}
 
-delegation: {source: "https://github.com/EGAILab/minion-agent/issues/75", routing: false}   # routing: true once the #75 amendment (decision 3.1) is confirmed by the Owner
+delegation: {source: "https://github.com/EGAILab/minion-agent/issues/75", routing: true}   # #75 Amendment 2 (Owner, 2026-10-12): routes RT-1..RT-6 delegated (routing.md)
 wp_kinds_enabled: [semantic, delta, process, scoping, status]   # Owner decision 2 (2026-10-11); schema enforcement lands in P2
 environment: ../.agents/project-environment.ps1

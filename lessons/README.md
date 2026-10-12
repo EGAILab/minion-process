@@ -21,5 +21,6 @@ is mechanical, a replay test (`replay/`, P3).
 | `L0506-D004-STATUS-SYNC` | §11.1.3 `CLOSED` needs its status sync merged first | §11.1.3 |
 | `STATE-BODY-FLATTENING` | §11.1.1 one-document state writes and the commit round-trip | §11.1.1 |
 | `CONTAINMENT-2026-10-10` | §9.8 storage inside the project root; containment checks before destructive operations | Minion-Agent `CLAUDE.md` |
+| `PROC-KIT-ROUTE-BY-CONSEQUENCE` | §4.3 route by consequence class; measured stage skips; the no-new-evidence signal | retrospective record §6.2–§6.3 |
 
 Sources are `EGAILab/minion-agent-docs` `process/agent-workflow.md` at `dd9fd15` unless stated.

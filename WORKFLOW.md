@@ -164,6 +164,21 @@ several largely independent high-risk surfaces, split it **before** contract dra
 Do not use "Pass" as a semantic or certification level. Review rounds are events within a work
 package, not additional project hierarchy.
 
+### 4.3 Kinds, consequence classes and stage skipping
+
+Every work package is classified at intake, before it leaves `SCOPING`, with a **kind** (`semantic`,
+`delta`, `process`, `scoping`, `status`) and a **consequence class** (`governing` or `mechanical`)
+derived from the consequence predicates: containment, acceptance, transitions, authority, execution,
+evidence interpretation (`consequence-classes.md`, `coordination-state.md` §14). The class, not the
+kind, selects the route: a governing change takes the full route of §11.4 and §11.8; a mechanical
+change keeps independent review and the final complete review of the changed candidate and drops only
+the convergence checkpoint ceremony. `semantic` and `delta` are governing by definition. The first
+independent review confirms or corrects the class. An upgrade is automatic and recorded when a finding
+matches a predicate; a downgrade is Owner-only. A stage is skipped only on a mechanical change, with
+the feasibility rows it would have examined measured against the pinned authority, the reviewer's
+consent recorded, and never the final complete review. The failure signal is a round that produces no
+new discriminating evidence, not the round count (`lessons/PROC-KIT-ROUTE-BY-CONSEQUENCE.md`).
+
 ## 5. Scope discipline
 
 The current task's layer boundary is binding.
@@ -606,7 +621,9 @@ unchanged; neither path weakens independent review or §11.3.
 
 The second implementation starts from the merged approved shared contract, never from an unapproved
 candidate branch. A WP MUST NOT move from `CONTRACT_CONVERGENCE` to a complete final review while a
-known convergence finding remains open. `FINAL_CONTRACT_REVIEW` is for a candidate that CHANGED after
+known convergence finding remains open. A **mechanical** WP (§4.3) follows draft → independent review
+→ remediation → targeted closure → final review of the changed candidate; it has no convergence
+episode, and a trigger firing on it upgrades its class instead (`routing.md` RT-5). `FINAL_CONTRACT_REVIEW` is for a candidate that CHANGED after
 the first `IMPLEMENTATION_REVIEW`; a truly clean first review merges directly without a second full
 review of the same content.
 
@@ -640,8 +657,14 @@ that implements an agreed contract or decision; documentary/status-only correcti
 non-blocking follow-up issues; ordinary handoffs. The delegation never weakens implementer-reviewer
 separation, exact-SHA approval (§11.3), negative controls (§11.8.7.1), convergence checkpoints, required
 final complete reviews, default-branch verification (§12) or the canonical round-trip. The Owner-only
-list in the delegation governs escalation; only the Owner amends or revokes the delegation. Routing by
-rule (`delegation.routing`) applies only once the Owner has extended the delegation to it.
+list in the delegation governs escalation; only the Owner amends or revokes the delegation.
+
+**Routing by rule.** When the profile says `delegation.routing: true`, the Owner has extended the
+delegation to the routes of `routing.md` (`RT-1`–`RT-6`): the coordinator takes the route and records
+it with its rule ID in `history.routes` instead of asking. `RT-6`, the convergence trigger, is
+notify-and-proceed, never silent. The Owner-only list stays open-ended and includes consequence-class
+downgrades, remote creation, risk acceptance and amending the delegation itself. With
+`delegation.routing: false` the coordinator asks as before.
 
 ### 11.8 Contract convergence protocol
 
@@ -664,7 +687,10 @@ remediation owner explicitly checks A, B and C against the finding's own review 
 surface and the WP's rejected-review count, and states the result ("R003 has survived one independent
 review, so A has not fired; …"). Being at two surviving reviews is A fired, not "approaching". If a
 trigger is met, convergence is the default; another point-fix pass requires stating why. Do not weaken
-the thresholds (`lessons/L08-TRIGGER-CHECK.md`).
+the thresholds (`lessons/L08-TRIGGER-CHECK.md`). Where routing is delegated (`routing.md` RT-6), a fired
+trigger is recorded with its counters and **notified to the Owner with the default route**; the
+coordinator proceeds on that default unless the Owner objects within the round. On a mechanical WP a
+fired trigger upgrades the class to governing first (RT-5).
 
 #### 11.8.1 Objective and episode tracking
 

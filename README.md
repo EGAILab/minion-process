@@ -15,7 +15,9 @@ Origin: the Minion-Agent Layers 11–14 / Minion-Memory retrospective
 
 ```text
 WORKFLOW.md                         normative core (project-neutral)
-coordination-state.md               the current-state model, invariants, transitions, load boundary
+coordination-state.md               the current-state model, invariants, transitions, load boundary, kinds and classes (§14)
+consequence-classes.md              kinds, consequence predicates, who classifies, measured stage skips
+routing.md                          delegated routes RT-1..RT-6 (in force per profile delegation.routing)
 gate-tiers.md                       G0–G3 and the minimum tier per stage
 finding-taxonomy.md                 generic finding classes; a profile supplies aliases
 authority-dependencies.md           pinned external authority dependencies (verify + execute, never trust)
@@ -71,7 +73,9 @@ ruff check . && mypy minion_process
 
 ## Status
 
-Version 0.1.0 is the P1 seed: the text of every rule of Minion-Agent's `agent-workflow.md` at
+Version 0.2.0 (P2) adds work-package kinds and consequence classes (`consequence-classes.md`), the
+delegated routing table (`routing.md`) and their state-schema fields and `apply` guards
+(`coordination-state.md` §14). Version 0.1.0 was the P1 seed: the text of every rule of Minion-Agent's `agent-workflow.md` at
 `minion-agent-docs` `dd9fd15` is preserved, either in `WORKFLOW.md` or verbatim in a `lessons/` record
 linked from the rule it supports. The `minion_process` package is the Minion-Agent tool at the same
 commit plus `profile validate`. The GitHub repository names the tool uses for the `code`/`docs` sides
