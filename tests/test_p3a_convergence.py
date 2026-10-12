@@ -201,7 +201,6 @@ ORDINARY = [
     "!!map\ndata: [unclosed",
     "? data\n: [unclosed",
     '"review: [unclosed',  # the scanner fails before any key: no recognizable first entry
-    'review: "\x00"',  # the reader rejects the stream before StreamStart (reviewer's disclosed boundary)
     "[review]",
     "? [review]\n: null",  # a collection key is not the scalar key review
     "*alias",
@@ -266,6 +265,15 @@ def test_m8_completed_and_malformed_pairs_share_their_discovery() -> None:
     for completed, malformed in zip(UNSUPPORTED_COMPLETED, UNSUPPORTED_MALFORMED, strict=True):
         assert discover(completed) == discover(malformed) == (True, True)
     assert discover("review: null") == discover("review: [unclosed") == (True, False)
+
+
+def test_nul_in_a_fence_is_normalized_by_the_markdown_transport_before_the_scanner() -> None:
+    # Revision 4 listed `review: "\x00"` as an ordinary fence (the YAML reader rejects NUL before any token).
+    # Revision 7 (R7a, disclosed) hands over the parser's content, in which the Markdown transport has already
+    # replaced U+0000 by U+FFFD, so the scanner now sees a plain first key `review` and the block is a claim.
+    (c,) = parse_review_records(fenced('review: "\x00"'))
+    assert c.record == {"review": "�"} and c.reason is None
+    assert discover('review: "\x00"') == (False, False)  # the raw YAML boundary itself is unchanged
 
 
 def test_fence_ordinal_counts_all_yaml_fences_in_the_comment() -> None:

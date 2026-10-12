@@ -45,6 +45,7 @@ from .profile import load_profile
 from .review import (
     Copy,
     Selection,
+    UnreadComment,
     counters,
     metrics,
     parse_review_records,
@@ -72,12 +73,16 @@ def _collect_reviews(gh: GitHub, repo: str, number: int) -> tuple[dict[str, Any]
     for side, entry in candidates(workflow).items():
         if isinstance(entry, dict) and entry.get("pr"):
             comments += gh.issue_comments(REPOS[side], int(entry["pr"]))
-    copies = [
-        Copy(comment["created_at"], comment["id"], claim)
-        for comment in comments
-        for claim in parse_review_records(comment["body"])
-    ]
-    return workflow, select_reviews(copies, str(workflow["work_package"]))
+    copies: list[Copy] = []
+    unread: list[int | None] = []
+    for comment in comments:
+        try:
+            claims = parse_review_records(comment["body"])
+        except UnreadComment:  # R11: the whole comment is excluded, visibly; nothing partial is credited
+            unread.append(comment["id"])
+            continue
+        copies += [Copy(comment["created_at"], comment["id"], claim) for claim in claims]
+    return workflow, select_reviews(copies, str(workflow["work_package"]), unread)
 
 
 def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
@@ -140,7 +145,12 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
         print("INVALID" if errors(problems) else "VALID")
         return 1 if errors(problems) else 0
     if args.command == "review-check":  # offline
-        claims = parse_review_records(Path(args.file).read_text(encoding="utf-8"))
+        try:
+            claims = parse_review_records(Path(args.file).read_text(encoding="utf-8"))
+        except UnreadComment as exc:
+            print(f"ERROR: review: the record could not be fully read by the Markdown parser ({exc})")
+            print("INVALID")
+            return 1
         if len(claims) != 1:
             print(f"ERROR: review: expected exactly one `review:` header, found {len(claims)}")
             print("INVALID")

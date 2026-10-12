@@ -40,10 +40,16 @@ Record §6.6; coordination `minion-agent#213` (PROC-KIT-P3, process / governing 
   properties, explicit key) > `unparsable` > `invalid shape` > valid; the statement and the metrics show
   every excluded header. `GitHub.issue_comments` returns `{id, created_at, body}`.
   Targeted closure 1 (`R001`/`R003` refined, `R004`): conflicts name the differing fields; any loader
-  failure of a recognized claim is `unparsable` and collection continues; review fences are CommonMark
-  fenced code blocks (content of an outer block is literal, openers are line-level); a comment whose
-  publication metadata the remote does not return is reported as unorderable and makes the statement
-  and metrics INCOMPLETE, never a negative result.
+  failure of a recognized claim is `unparsable` and collection continues; a comment whose publication
+  metadata the remote does not return is reported as unorderable and makes the statement and metrics
+  INCOMPLETE, never a negative result.
+  Agreed checkpoint revision 7 (`R003`): the publication domain is the CommonMark parser's block
+  structure (`markdown-it-py`, `commonmark` preset, no plugins): a top-level fenced code block whose raw
+  info string starts with `yaml`/`yml`; quotations, list items, HTML blocks, outer code blocks, indented
+  code and inline code are not publications; content is handed to YAML exactly as the parser yields it
+  (the transport replaces U+0000 by U+FFFD). The parser's nesting cutoff is made unreachable so no input
+  is silently truncated; a parser failure (including the interpreter's recursion limit) makes the whole
+  comment `unread`, reported by id, and the statement and metrics INCOMPLETE.
 - Not yet: `dispatch`, `session start`, `cleanup`, launchers, fault-fired rule, replay suite (0.4.0).
 
 ## 0.2.0 — P2: kinds, consequence classes, routing (2026-10-12)

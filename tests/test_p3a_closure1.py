@@ -19,9 +19,9 @@ from minion_process.review import (
     counters,
     metrics,
     parse_review_records,
+    publication_fences,
     select_reviews,
     trigger_statement,
-    yaml_fences,
 )
 
 from .test_minion_process import CODE, FakeGitHub, workflow
@@ -84,23 +84,27 @@ def test_markdown_example_text_is_not_a_published_fence() -> None:
     inner = fence(header())
     assert len(parse_review_records(inner)) == 1  # the real thing
     wrapped = "````markdown\n" + inner + "````\n"  # the template's own display of an example
-    assert yaml_fences(wrapped) == [] and parse_review_records(wrapped) == []
+    assert publication_fences(wrapped) == [] and parse_review_records(wrapped) == []
     tilde_wrapped = "~~~~\n" + inner + "~~~~\n"
     assert parse_review_records(tilde_wrapped) == []
     not_an_opener = "Example " + inner  # an opener is a line-level marker
     assert parse_review_records(not_an_opener) == []
-    indented = "   " + inner  # up to three spaces of indentation is still a fence
+    indented = "".join(
+        "   " + line + "\n" for line in inner.splitlines()
+    )  # up to three spaces is still a fence
     assert len(parse_review_records(indented)) == 1
     unclosed = "```yaml\nreview: null\n"
-    assert parse_review_records(unclosed) == []  # never closed: not a published block
+    assert len(parse_review_records(unclosed)) == 1  # CommonMark closes the block at the end of the document
     two = inner + "\nprose\n" + fence(header(round=2)) + "```text\nreview: null\n```\n"
     assert [c.ordinal for c in parse_review_records(two)] == [0, 1]  # the text fence is not YAML
-    assert yaml_fences("```yaml extra info\nreview: null\n```\n") == ["review: null"]
-    assert yaml_fences("```yaml\n a\n````\nmore\n```\n") == [" a"]  # a longer run of the same char closes
-    assert yaml_fences("~~~yaml\n a\n```\n b\n~~~\n") == [" a\n```\n b"]  # a different char does not close
+    assert publication_fences("```yaml extra info\nreview: null\n```\n") == ["review: null\n"]
+    assert publication_fences("```yaml\n a\n````\nmore\n```\n") == [
+        " a\n"
+    ]  # a longer run of the same char closes
+    assert publication_fences("~~~yaml\n a\n```\n b\n~~~\n") == [" a\n```\n b\n"]  # a different char does not
     assert (
-        yaml_fences("``` yaml` x\nreview: null\n```\n") == []
-    )  # a backtick in the info string is not a fence
+        publication_fences("``` yaml` x\nreview: null\n```\n") == []
+    )  # a backtick in the info string: no fence
 
 
 # --- R004: publication metadata completeness ---------------------------------------------------------------

@@ -40,10 +40,13 @@ reports the identity **and the differing fields**, excludes them, and never choo
 are ordered by the publication time of their earliest copy; a comment whose publication metadata the
 remote does not return is reported as unorderable and makes the statement incomplete.
 
-**Where the header is found.** The tool reads fenced code blocks of the comment as Markdown defines them
-(an opener line of three or more backticks or tildes with the info string `yaml`/`yml`, closed by a
-matching line). Text inside an outer code block, such as this template's own example, is literal and is
-never read as a published header.
+**Where the header is found.** A review header is published by placing it, as the first mapping key
+`review`, in a **top-level fenced code block** of the comment whose raw info string starts with `yaml` or
+`yml`, as CommonMark defines fenced code blocks. Text that is quoted (`>`), inside a list item, inside
+HTML, inside another code block (such as this template's own example), indented as code, or inline is
+not a publication. A comment the tool cannot fully read (its Markdown parser fails, for example on
+absurd nesting) is reported as unread and makes the tool's result INCOMPLETE; it is never silently
+shortened. The Markdown transport replaces U+0000 by U+FFFD before the header is read.
 
 **How to publish the header.** Write it as a block mapping whose first line is `review:` (or
 `"review":`), or as a flow mapping `{review: …}`, optionally after YAML directives or a `---` line. Do

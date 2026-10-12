@@ -583,7 +583,10 @@ candidate SHA(s), authority revision, scope, findings, witness links, verdict an
 compute from, so a verdict that is not published with its header is invisible to them. One review
 event is `(wp, reviewer, round)`: copies of one verdict published on the issue and the candidate PRs are
 transport and count once; a separately issued verdict is a new round; copies with one identity but
-different values are a conflict the tool reports and excludes rather than resolves. At
+different values are a conflict the tool reports and excludes rather than resolves. The header is read
+only from a top-level `yaml`/`yml` fenced code block of the comment as CommonMark defines it; quotations,
+list items, HTML and nested code are not publications, and a comment the tool cannot fully read is
+reported as unread and makes its result INCOMPLETE rather than being silently shortened. At
 certification, summarize material intermediate evidence into the final assurance record. Do not reduce
 evidence quality; reduce redundant repository objects.
 

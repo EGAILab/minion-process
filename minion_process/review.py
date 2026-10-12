@@ -25,11 +25,13 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
+from markdown_it import MarkdownIt
 from yaml.tokens import (
     AnchorToken,
     BlockMappingStartToken,
@@ -60,42 +62,35 @@ TIERS = ("G0", "G1", "G2", "G3", "none")
 CLASS_OUTCOMES = ("CONFIRMED", "CORRECTED")
 ALIAS = re.compile(r"^[A-Z][A-Z0-9_]*$")
 NOT_APPLICABLE = "NOT_APPLICABLE"
-FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
-"""A CommonMark fenced-code-block opener or closer line (§4.5): up to three spaces of indentation, then a
-run of at least three backticks or tildes. A closer uses the opener's character with at least its
-length and nothing but whitespace after it; everything between is literal content, so a fence shown
-inside an outer code block (an example in a template) is never a published fence of its own."""
-YAML_INFO = re.compile(r"^(ya?ml)(\s|$)", re.IGNORECASE)
+PARSER = MarkdownIt("commonmark", {"maxNesting": sys.maxsize})
+"""The CommonMark parser that decides which text of a comment is a fenced code block (R7a). The
+`commonmark` preset only, no plugins. `maxNesting` is unreachable (R11b): the library's only silent
+truncation branches run when nesting reaches that limit, so with it unreachable every parse either reads
+the whole body or raises (the interpreter's recursion limit), and the exception is contained per comment
+(R11a). Never configure a finite limit here and never raise the recursion limit to make a body parse."""
+PUBLICATION_LANGUAGES = ("yaml", "yml")
 
 
-def yaml_fences(text: str) -> list[str]:
-    """The content of every top-level fenced code block whose info string names YAML, in document order
-    (R7 operates on fenced blocks, not on backtick substrings). CRLF is normalized first."""
+class UnreadComment(Exception):
+    """The parser did not return normally for a comment (R11a): the comment contributes no claims and is
+    reported as unread; the statement and metrics are INCOMPLETE."""
+
+
+def publication_fences(text: str) -> list[str]:
+    """The content of every publication fence of a comment, in document order (R7a): a fenced code block at
+    the top level of the document (not inside a block quote or list item) whose raw info string's first
+    whitespace-delimited word is `yaml` or `yml`, compared case-insensitively and without entity decoding.
+    Content is exactly what the parser yields (opener indentation removed, line endings normalized, U+0000
+    replaced by U+FFFD by the parser's core normalization, terminal line feed kept). Raises whatever the
+    parser raises; `parse_review_records` turns that into `UnreadComment`."""
+    tokens = PARSER.parse(text, {})  # a fresh environment per comment
     found: list[str] = []
-    open_char = ""
-    open_len = 0
-    info_is_yaml = False
-    content: list[str] = []
-    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        match = FENCE_LINE.match(line)
-        if open_char:
-            if (
-                match
-                and match.group(1)[0] == open_char
-                and len(match.group(1)) >= open_len
-                and not match.group(2).strip()
-            ):
-                if info_is_yaml:
-                    found.append("\n".join(content))
-                open_char, content = "", []
-            else:
-                content.append(line)
+    for token in tokens:
+        if token.type != "fence" or token.level != 0:
             continue
-        if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
-            open_char, open_len = match.group(1)[0], len(match.group(1))
-            info_is_yaml = YAML_INFO.match(match.group(2).strip()) is not None
-            content = []
-    # An unclosed fence (CommonMark would close it at the end of the document) is treated as unpublished.
+        words = token.info.split()
+        if words and words[0].lower() in PUBLICATION_LANGUAGES:
+            found.append(token.content)
     return found
 
 
@@ -195,11 +190,16 @@ def discover(block: str) -> tuple[bool, bool]:
 
 
 def parse_review_records(text: str) -> list[Claim]:
-    """Every review claim in `text` (R7), each with its disposition reason when decided before shape
-    validation (R8 priorities 1-2) or its loaded record otherwise. Never raises; nothing recognizable is
-    dropped (R10)."""
+    """Every review claim in `text` (R7a, R7b), each with its disposition reason when decided before shape
+    validation (R8 priorities 1-2) or its loaded record otherwise. Nothing recognizable is dropped (R10).
+    Raises `UnreadComment`, and nothing else, when the Markdown parser does not return normally (R11a); no
+    claim of such a comment is ever emitted, including a fence tokenized before the failure."""
+    try:
+        blocks = publication_fences(text)
+    except Exception as exc:  # RecursionError included; never retried with a larger limit
+        raise UnreadComment(type(exc).__name__) from None
     claims: list[Claim] = []
-    for ordinal, block in enumerate(yaml_fences(text)):
+    for ordinal, block in enumerate(blocks):
         is_claim, unsupported = discover(block)
         if not is_claim:
             continue
@@ -408,6 +408,7 @@ class Selection:
     invalid: dict[str, int] = field(default_factory=lambda: dict.fromkeys(REASONS, 0))
     multi_header_comments: int = 0
     unorderable: int = 0
+    unread_comments: list[int | None] = field(default_factory=list)  # R11: ids of comments not fully read
 
     @property
     def invalid_total(self) -> int:
@@ -415,7 +416,7 @@ class Selection:
 
     @property
     def complete(self) -> bool:
-        return self.unorderable == 0
+        return self.unorderable == 0 and not self.unread_comments
 
 
 def _differing_fields(headers: list[dict[str, Any]]) -> list[str]:
@@ -424,9 +425,10 @@ def _differing_fields(headers: list[dict[str, Any]]) -> list[str]:
     return [k for k in keys if len({json.dumps(h.get(k), sort_keys=True, default=str) for h in headers}) > 1]
 
 
-def select_reviews(copies: list[Copy], wp: str) -> Selection:
-    """R1-R6 over the published copies of one work package."""
-    s = Selection()
+def select_reviews(copies: list[Copy], wp: str, unread: list[int | None] | None = None) -> Selection:
+    """R1-R6 over the published copies of one work package; `unread` are the ids of comments the parser
+    did not fully read (R11), carried through so the result is marked INCOMPLETE."""
+    s = Selection(unread_comments=list(unread or []))
     per_comment: Counter[int] = Counter()
     groups: dict[tuple[str, str, int], list[tuple[tuple[str, int, int, int], str, dict[str, Any]]]] = {}
     for copy in copies:
@@ -486,6 +488,7 @@ class Counters:
     invalid: dict[str, int] = field(default_factory=lambda: dict.fromkeys(REASONS, 0))
     multi_header_comments: int = 0
     unorderable: int = 0
+    unread_comments: list[int | None] = field(default_factory=list)
 
     @property
     def a_fired(self) -> list[str]:
@@ -512,6 +515,7 @@ def counters(selection: Selection) -> Counters:
         invalid=dict(selection.invalid),
         multi_header_comments=selection.multi_header_comments,
         unorderable=selection.unorderable,
+        unread_comments=list(selection.unread_comments),
     )
     streak = 0
     for r in selection.events:
@@ -547,6 +551,12 @@ def trigger_statement(k: Counters) -> str:
         lines.append(
             f"EXCLUDED: {k.unorderable} review claim(s) in comment(s) without publication metadata (id or "
             "created_at missing): they cannot be ordered and were not read. THIS STATEMENT IS INCOMPLETE."
+        )
+    if k.unread_comments:
+        ids = ", ".join("no id" if i is None else str(i) for i in k.unread_comments)
+        lines.append(
+            f"EXCLUDED: {len(k.unread_comments)} comment(s) could not be fully read by the Markdown parser "
+            f"(comment id {ids}): no claim from them was read. THIS STATEMENT IS INCOMPLETE."
         )
     if k.conflicts:
         described = "; ".join(
@@ -589,11 +599,11 @@ def trigger_statement(k: Counters) -> str:
             "CONVERGENCE TRIGGER FIRED: enter CONTRACT_CONVERGENCE, or state why a single targeted fix "
             "closes the surface (routing.md RT-6 where routing is delegated)."
         )
-    elif k.unorderable:
+    elif k.unorderable or k.unread_comments:
         lines.append(
-            "RESULT INCOMPLETE: review claims were excluded for missing publication metadata, so no negative "
-            "conclusion follows from the events read. Establish the metadata (or the missing events) and "
-            "rerun; "
+            "RESULT INCOMPLETE: evidence was excluded (publication metadata missing or a comment not fully "
+            "read), so no negative conclusion follows from the events read. Establish the missing evidence "
+            "and rerun; "
             "the coordinator's own section 11.8 check against the full review history remains mandatory."
         )
     else:
@@ -652,13 +662,15 @@ def metrics(workflow: dict[str, Any], selection: Selection) -> dict[str, Any]:
         "invalid_review_headers": dict(k.invalid),
         "comments_with_multiple_headers": k.multi_header_comments,
         "claims_without_publication_metadata": k.unorderable,
-        "complete": k.unorderable == 0,
+        "unread_comments": list(k.unread_comments),
+        "complete": k.unorderable == 0 and not k.unread_comments,
     }
 
 
 __all__ = [
     "FINDING_ID",
     "INVALID_SHAPE",
+    "PARSER",
     "SCHEMA_VERSION",
     "UNPARSABLE",
     "UNSUPPORTED",
@@ -666,12 +678,13 @@ __all__ = [
     "Copy",
     "Counters",
     "Selection",
+    "UnreadComment",
     "counters",
     "discover",
     "metrics",
     "parse_review_records",
+    "publication_fences",
     "select_reviews",
     "trigger_statement",
     "validate_review",
-    "yaml_fences",
 ]
