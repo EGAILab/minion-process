@@ -60,8 +60,44 @@ TIERS = ("G0", "G1", "G2", "G3", "none")
 CLASS_OUTCOMES = ("CONFIRMED", "CORRECTED")
 ALIAS = re.compile(r"^[A-Z][A-Z0-9_]*$")
 NOT_APPLICABLE = "NOT_APPLICABLE"
-FENCE = re.compile(r"```ya?ml[ \t]*\r?\n(.*?)\r?\n```", re.DOTALL)
-"""Every fenced YAML block, in document order; `discover` decides which ones are review claims."""
+FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+"""A CommonMark fenced-code-block opener or closer line (§4.5): up to three spaces of indentation, then a
+run of at least three backticks or tildes. A closer uses the opener's character with at least its
+length and nothing but whitespace after it; everything between is literal content, so a fence shown
+inside an outer code block (an example in a template) is never a published fence of its own."""
+YAML_INFO = re.compile(r"^(ya?ml)(\s|$)", re.IGNORECASE)
+
+
+def yaml_fences(text: str) -> list[str]:
+    """The content of every top-level fenced code block whose info string names YAML, in document order
+    (R7 operates on fenced blocks, not on backtick substrings). CRLF is normalized first."""
+    found: list[str] = []
+    open_char = ""
+    open_len = 0
+    info_is_yaml = False
+    content: list[str] = []
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        match = FENCE_LINE.match(line)
+        if open_char:
+            if (
+                match
+                and match.group(1)[0] == open_char
+                and len(match.group(1)) >= open_len
+                and not match.group(2).strip()
+            ):
+                if info_is_yaml:
+                    found.append("\n".join(content))
+                open_char, content = "", []
+            else:
+                content.append(line)
+            continue
+        if match and not (match.group(1)[0] == "`" and "`" in match.group(2)):
+            open_char, open_len = match.group(1)[0], len(match.group(1))
+            info_is_yaml = YAML_INFO.match(match.group(2).strip()) is not None
+            content = []
+    # An unclosed fence (CommonMark would close it at the end of the document) is treated as unpublished.
+    return found
+
 
 UNSUPPORTED = "unsupported publication form"
 UNPARSABLE = "unparsable"
@@ -153,7 +189,7 @@ def discover(block: str) -> tuple[bool, bool]:
                 if isinstance(token, ScalarToken):
                     return (True, unsupported) if token.value == "review" else (False, False)
                 return False, False  # a collection or alias key is not the scalar key `review`
-    except yaml.YAMLError:
+    except Exception:  # a reader or scanner failure before the first key: no recognizable first entry
         return False, False
     return False, False  # pragma: no cover  (the scanner always ends with StreamEnd, handled above)
 
@@ -163,8 +199,7 @@ def parse_review_records(text: str) -> list[Claim]:
     validation (R8 priorities 1-2) or its loaded record otherwise. Never raises; nothing recognizable is
     dropped (R10)."""
     claims: list[Claim] = []
-    for ordinal, match in enumerate(FENCE.finditer(text)):
-        block = match.group(1)
+    for ordinal, block in enumerate(yaml_fences(text)):
         is_claim, unsupported = discover(block)
         if not is_claim:
             continue
@@ -173,7 +208,7 @@ def parse_review_records(text: str) -> list[Claim]:
             continue
         try:
             claims.append(Claim(ordinal, yaml.safe_load(block), None))
-        except yaml.YAMLError:
+        except Exception:  # any loader or construction failure of a recognized claim is `unparsable`
             claims.append(Claim(ordinal, None, UNPARSABLE))
     return claims
 
@@ -351,25 +386,42 @@ def _closed(c: _Check, closed: Any) -> None:
 class Copy:
     """One published copy of a review claim: the remote's publication metadata plus the claim."""
 
-    created_at: str
-    comment_id: int
+    created_at: str | None
+    comment_id: int | None
     claim: Claim
+
+    @property
+    def orderable(self) -> bool:
+        """R5/R6 need the remote's publication metadata; a copy without it cannot be placed in time."""
+        return isinstance(self.created_at, str) and isinstance(self.comment_id, int)
 
 
 @dataclass
 class Selection:
     """The distinct, valid review events of one work package, in publication order, with everything
-    that was excluded from them made visible."""
+    that was excluded from them made visible. `unorderable` copies (publication metadata missing) make
+    the whole selection INCOMPLETE: it can still show what it read, never a negative result."""
 
     events: list[dict[str, Any]] = field(default_factory=list)
     mirrors: int = 0
-    conflicts: list[str] = field(default_factory=list)
+    conflicts: list[dict[str, Any]] = field(default_factory=list)  # {identity, fields}
     invalid: dict[str, int] = field(default_factory=lambda: dict.fromkeys(REASONS, 0))
     multi_header_comments: int = 0
+    unorderable: int = 0
 
     @property
     def invalid_total(self) -> int:
         return sum(self.invalid.values())
+
+    @property
+    def complete(self) -> bool:
+        return self.unorderable == 0
+
+
+def _differing_fields(headers: list[dict[str, Any]]) -> list[str]:
+    """The top-level header fields whose values differ among same-identity copies (R4)."""
+    keys = sorted({str(k) for h in headers for k in h})
+    return [k for k in keys if len({json.dumps(h.get(k), sort_keys=True, default=str) for h in headers}) > 1]
 
 
 def select_reviews(copies: list[Copy], wp: str) -> Selection:
@@ -378,6 +430,10 @@ def select_reviews(copies: list[Copy], wp: str) -> Selection:
     per_comment: Counter[int] = Counter()
     groups: dict[tuple[str, str, int], list[tuple[tuple[str, int, int, int], str, dict[str, Any]]]] = {}
     for copy in copies:
+        if not copy.orderable:
+            s.unorderable += 1  # R004: evidence whose publication metadata is missing is excluded, visibly
+            continue
+        assert isinstance(copy.comment_id, int)  # narrowed by `orderable`
         per_comment[copy.comment_id] += 1
         claim = copy.claim
         if claim.reason is not None:
@@ -390,19 +446,24 @@ def select_reviews(copies: list[Copy], wp: str) -> Selection:
         if header["wp"] != wp:
             continue  # another work package's record published here: not this WP's evidence
         identity = (str(header["wp"]), str(header["reviewer"]), int(header["round"]))
-        key = (copy.created_at, int(header["round"]), copy.comment_id, claim.ordinal)
+        key = (str(copy.created_at), int(header["round"]), copy.comment_id, claim.ordinal)
         canonical = json.dumps(header, sort_keys=True, default=str)
         groups.setdefault(identity, []).append((key, canonical, header))
     s.multi_header_comments = sum(1 for n in per_comment.values() if n > 1)
     ordered: list[tuple[tuple[str, int, int, int], dict[str, Any]]] = []
     for identity, members in groups.items():
         if len({canonical for _, canonical, _ in members}) > 1:
-            s.conflicts.append(f"(wp={identity[0]}, reviewer={identity[1]}, round={identity[2]})")
+            s.conflicts.append(
+                {
+                    "identity": f"(wp={identity[0]}, reviewer={identity[1]}, round={identity[2]})",
+                    "fields": _differing_fields([header for _, _, header in members]),
+                }
+            )
             continue
         s.mirrors += len(members) - 1
         representative = min(members, key=lambda m: m[0])
         ordered.append((representative[0], representative[2]))
-    s.conflicts.sort()
+    s.conflicts.sort(key=lambda c: str(c["identity"]))
     s.events = [header for _, header in sorted(ordered, key=lambda m: m[0])]
     return s
 
@@ -421,9 +482,10 @@ class Counters:
     rounds_without_new_evidence: int = 0
     consecutive_without_new_evidence: int = 0
     mirrors: int = 0
-    conflicts: list[str] = field(default_factory=list)
+    conflicts: list[dict[str, Any]] = field(default_factory=list)
     invalid: dict[str, int] = field(default_factory=lambda: dict.fromkeys(REASONS, 0))
     multi_header_comments: int = 0
+    unorderable: int = 0
 
     @property
     def a_fired(self) -> list[str]:
@@ -449,6 +511,7 @@ def counters(selection: Selection) -> Counters:
         conflicts=list(selection.conflicts),
         invalid=dict(selection.invalid),
         multi_header_comments=selection.multi_header_comments,
+        unorderable=selection.unorderable,
     )
     streak = 0
     for r in selection.events:
@@ -480,10 +543,19 @@ def trigger_statement(k: Counters) -> str:
         lines.append(
             f"{k.mirrors} transport cop{'y' if k.mirrors == 1 else 'ies'} of the same event ignored."
         )
+    if k.unorderable:
+        lines.append(
+            f"EXCLUDED: {k.unorderable} review claim(s) in comment(s) without publication metadata (id or "
+            "created_at missing): they cannot be ordered and were not read. THIS STATEMENT IS INCOMPLETE."
+        )
     if k.conflicts:
+        described = "; ".join(
+            f"{c['identity']} differing in {', '.join(c['fields']) or 'no top-level field'}"
+            for c in k.conflicts
+        )
         lines.append(
             f"EXCLUDED: {len(k.conflicts)} conflicting identit{'y' if len(k.conflicts) == 1 else 'ies'} "
-            f"(copies with the same identity but different values; not resolved): {'; '.join(k.conflicts)}."
+            f"(copies with the same identity but different values; not resolved): {described}."
         )
     if k.invalid_total:
         parts = [f"{n} {reason}" for reason, n in k.invalid.items() if n]
@@ -512,13 +584,23 @@ def trigger_statement(k: Counters) -> str:
         f"(longest streak {k.consecutive_without_new_evidence})."
     )
     fired = bool(k.a_fired or k.b_fired or k.c_fired)
-    lines.append(
-        "CONVERGENCE TRIGGER FIRED: enter CONTRACT_CONVERGENCE, or state why a single targeted fix closes "
-        "the surface (routing.md RT-6 where routing is delegated)."
-        if fired
-        else "No trigger fired in the recorded events. The coordinator's own section 11.8 check against the "
-        "full review history, including anything excluded above, remains mandatory."
-    )
+    if fired:
+        lines.append(
+            "CONVERGENCE TRIGGER FIRED: enter CONTRACT_CONVERGENCE, or state why a single targeted fix "
+            "closes the surface (routing.md RT-6 where routing is delegated)."
+        )
+    elif k.unorderable:
+        lines.append(
+            "RESULT INCOMPLETE: review claims were excluded for missing publication metadata, so no negative "
+            "conclusion follows from the events read. Establish the metadata (or the missing events) and "
+            "rerun; "
+            "the coordinator's own section 11.8 check against the full review history remains mandatory."
+        )
+    else:
+        lines.append(
+            "No trigger fired in the recorded events. The coordinator's own section 11.8 check against the "
+            "full review history, including anything excluded above, remains mandatory."
+        )
     return "\n".join(lines)
 
 
@@ -566,9 +648,11 @@ def metrics(workflow: dict[str, Any], selection: Selection) -> dict[str, Any]:
         "owner_questions_routed": sum(1 for r in route_ids if r in ("RT-4", "RT-6")),
         "triggers": {"A": k.a_fired, "B": k.b_fired, "C": k.c_fired},
         "transport_copies_ignored": k.mirrors,
-        "conflicting_identities": list(k.conflicts),
+        "conflicting_identities": [dict(c) for c in k.conflicts],
         "invalid_review_headers": dict(k.invalid),
         "comments_with_multiple_headers": k.multi_header_comments,
+        "claims_without_publication_metadata": k.unorderable,
+        "complete": k.unorderable == 0,
     }
 
 
@@ -589,4 +673,5 @@ __all__ = [
     "select_reviews",
     "trigger_statement",
     "validate_review",
+    "yaml_fences",
 ]

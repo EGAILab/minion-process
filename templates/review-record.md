@@ -36,8 +36,14 @@ review:
 normal transport: copies with equal parsed values are one event, counted once, whatever their line
 endings, key quoting, key order or comments. A separately issued verdict, even with every other field
 equal, is a new `round`. Copies with the same identity but different values are a **conflict**: the tool
-reports the identity and excludes them, and never chooses between them. Events are ordered by the
-publication time of their earliest copy.
+reports the identity **and the differing fields**, excludes them, and never chooses between them. Events
+are ordered by the publication time of their earliest copy; a comment whose publication metadata the
+remote does not return is reported as unorderable and makes the statement incomplete.
+
+**Where the header is found.** The tool reads fenced code blocks of the comment as Markdown defines them
+(an opener line of three or more backticks or tildes with the info string `yaml`/`yml`, closed by a
+matching line). Text inside an outer code block, such as this template's own example, is literal and is
+never read as a published header.
 
 **How to publish the header.** Write it as a block mapping whose first line is `review:` (or
 `"review":`), or as a flow mapping `{review: …}`, optionally after YAML directives or a `---` line. Do

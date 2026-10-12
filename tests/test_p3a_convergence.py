@@ -112,7 +112,10 @@ def test_m3_same_identity_different_values_is_a_reported_conflict_and_presentati
         cp("2026-10-12T01:00:05Z", 2, header(round=3, verdict="APPROVED", findings=[])),
     ]
     s = select_reviews(conflict, "WP-X")
-    assert s.events == [] and s.conflicts == ["(wp=WP-X, reviewer=Codex, round=3)"] and s.mirrors == 0
+    assert s.events == [] and s.mirrors == 0
+    assert s.conflicts == [
+        {"identity": "(wp=WP-X, reviewer=Codex, round=3)", "fields": ["findings", "verdict"]}
+    ]
     text = trigger_statement(counters(s))
     assert "EXCLUDED: 1 conflicting identity" in text and "round=3" in text
     assert "remains mandatory" in text  # no trigger, but never a clean negative

@@ -108,16 +108,25 @@ class GitHub:
     def issue_comments(self, repo: str, number: int) -> list[dict[str, Any]]:
         """Every comment on an issue or PR as `{id, created_at, body}` (PR conversation comments are issue
         comments). Paginated and slurped so the pages come back as one JSON array of arrays. The `id`
-        and `created_at` are the remote's publication metadata the review chronology rests on; a comment
-        missing any of the three fields is skipped (it cannot be ordered or read)."""
+        and `created_at` are the remote's publication metadata the review chronology rests on; when the
+        response lacks one of them the field is returned as None, never manufactured and never silently
+        dropped, so the collector can report the comment as unorderable (`PROC-KIT-P3-R004`). A comment
+        without a string body carries nothing to read and is skipped."""
         out = self._run(["api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"], None)
         pages = json.loads(out) if out.strip() else []
         comments: list[dict[str, Any]] = []
         for page in pages:
             for comment in page:
                 body, cid, created = comment.get("body"), comment.get("id"), comment.get("created_at")
-                if isinstance(body, str) and isinstance(cid, int) and isinstance(created, str):
-                    comments.append({"id": cid, "created_at": created, "body": body})
+                if not isinstance(body, str):
+                    continue
+                comments.append(
+                    {
+                        "id": cid if isinstance(cid, int) else None,
+                        "created_at": created if isinstance(created, str) else None,
+                        "body": body,
+                    }
+                )
         return comments
 
     def close_issue(self, repo: str, number: int, comment: str) -> None:

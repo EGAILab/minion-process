@@ -63,8 +63,8 @@ class FakeGitHub:
     def published(self, repo: str, number: int, index: int, entry: Any) -> dict[str, Any]:
         """A stored comment as the API returns it. A plain string gets a deterministic id and timestamp
         (increasing with position, distinct per issue); a mapping supplies its own `id`/`created_at`."""
-        if isinstance(entry, dict):
-            return {"id": entry["id"], "created_at": entry["created_at"], "body": entry["body"]}
+        if isinstance(entry, dict):  # exactly the keys given: a missing id/created_at stays missing
+            return dict(entry)
         cid = number * 1000 + index + 1
         return {
             "id": cid,

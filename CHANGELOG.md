@@ -39,6 +39,11 @@ Record §6.6; coordination `minion-agent#213` (PROC-KIT-P3, process / governing 
   scalar, with one disposition per claim in priority `unsupported publication form` (root or key
   properties, explicit key) > `unparsable` > `invalid shape` > valid; the statement and the metrics show
   every excluded header. `GitHub.issue_comments` returns `{id, created_at, body}`.
+  Targeted closure 1 (`R001`/`R003` refined, `R004`): conflicts name the differing fields; any loader
+  failure of a recognized claim is `unparsable` and collection continues; review fences are CommonMark
+  fenced code blocks (content of an outer block is literal, openers are line-level); a comment whose
+  publication metadata the remote does not return is reported as unorderable and makes the statement
+  and metrics INCOMPLETE, never a negative result.
 - Not yet: `dispatch`, `session start`, `cleanup`, launchers, fault-fired rule, replay suite (0.4.0).
 
 ## 0.2.0 — P2: kinds, consequence classes, routing (2026-10-12)
