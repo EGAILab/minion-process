@@ -24,6 +24,8 @@ Coordination `minion-agent#212` (PROC-KIT-P2).
   lowering is the Owner-only downgrade); supplied `null` in the new fields is a diagnostic, not absence;
   `classification_pending` keeps intake pending across a pause; a skip needs an explicit `mechanical`
   class; `RT-1` wording aligned with Amendment 2; `CLASS CONFIRMATION` line in the review-record template.
+  Re-review (`R003` refined): `schema_version` never rolls back in an ordinary `apply`, and the intake
+  obligation is computed from the higher of the current and intended versions.
 - Not yet: `convergence counters`, structured review-record header, metrics, launchers, replay (P3);
   state-file backend and profile-driven repositories (P3/P4).
 

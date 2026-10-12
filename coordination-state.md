@@ -791,6 +791,10 @@ workflow:
 - **Classification is sticky.** Once recorded, `kind` and `consequence` are never removed or nulled;
   any effective lowering from `governing` (to `mechanical` or to absent) is the Owner-only downgrade
   (`PROC-KIT-P2-R001`).
+- **No schema rollback.** `schema_version` never decreases in an ordinary `apply`; the intake
+  obligation is computed from the higher of the current and intended versions, so a new v2 record
+  cannot be retagged as legacy v1 to escape intake (`PROC-KIT-P2-R003`, refined). A genuine v1 record
+  may be upgraded to v2 and takes the v2 rules from then on.
 - **Kind is fixed after intake.** A different kind is a new WP.
 - **Downgrade is Owner-only.** governing → mechanical requires `consequence.downgrade` and a recorded
   `governance_source`; the tool checks presence, the agent validates the source (§11.10).

@@ -89,7 +89,10 @@ def classification_guard(old: dict[str, Any], new: dict[str, Any]) -> str | None
     - **Pending intake survives a pause** (`PROC-KIT-P2-R003`): a new v2 WP that leaves `SCOPING` for
       `BLOCKED_FOR_OWNER` or `WAITING_FOR_TRIGGER` unclassified records `classification_pending: true`,
       and may not enter a working state until it is classified. WPs opened before kit 0.2.0 carry no
-      flag and are not re-classified mid-flight."""
+      flag and are not re-classified mid-flight.
+    - **No schema rollback** (`PROC-KIT-P2-R003`, refined): `schema_version` never decreases in an ordinary
+      apply, and the intake obligation is computed from the higher of the current and intended versions,
+      so a new v2 record cannot be retagged as legacy v1 to escape intake."""
     old_status, new_status = old["status"], new["status"]
     kind_old, kind_new = old.get("kind"), new.get("kind")
     class_old = (
@@ -98,7 +101,15 @@ def classification_guard(old: dict[str, Any], new: dict[str, Any]) -> str | None
     class_new = (
         (new.get("consequence") or {}).get("class") if isinstance(new.get("consequence"), dict) else None
     )
-    lean = new.get("schema_version", 1) >= 2  # v1 (pre-lean) states are legacy; intake applies from v2
+    version_old, version_new = old.get("schema_version", 1), new.get("schema_version", 1)
+    if version_new < version_old:
+        return (
+            f"schema_version cannot be rolled back ({version_old} -> {version_new}); a record is legacy only "
+            "if it was never a later version (§14, PROC-KIT-P2-R003)"
+        )
+    # Intake applies from schema v2 on. The obligation is computed from the higher of the current and
+    # intended versions, so a newly opened v2 WP cannot be retagged into the legacy exemption.
+    lean = max(version_old, version_new) >= 2
     unclassified_new = kind_new is None or class_new is None
     if kind_old is not None and kind_new is None:
         return "classification is sticky: `kind` cannot be removed or nulled once recorded (§14)"
