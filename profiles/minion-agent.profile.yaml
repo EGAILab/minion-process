@@ -1,0 +1,43 @@
+# Minion-Agent profile (first consumer): the kit's reference copy, validated in the kit's CI.
+# Intended live location on future adoption: minion-agent-docs/process/profile.yaml (no such file exists
+# until Minion-Agent's own reviewed adoption PR; this file does not imply present adoption).
+kit: {version: "0.1.0", source: EGAILab/minion-process}
+project: minion-agent
+
+authority:                                # agent-workflow.md section 3: adopted Pi source -> parity manifest -> spec -> conformance
+  - {kind: source, name: pi, pin: b7bb00b936dbe21b8e160b3e89efdec361846699, verify: git-sha}
+  - {kind: manifest, path: ../minion-agent/pi-parity-manifest.yaml}
+  - {kind: spec, path: spec/}
+  - {kind: conformance, path: ../minion-agent/conformance/}
+  - {kind: design, path: design/2026-08-20-minion-agent-design.md}
+  - {kind: register, name: pi-divergences, path: assurance/pi-divergences.md}
+
+repos:
+  code: {path: ../minion-agent, default_branch: main, github: EGAILab/minion-agent}
+  docs: {path: ., default_branch: master, github: EGAILab/minion-agent-docs}
+
+coordination: {backend: github-issue, repo: EGAILab/minion-agent}   # Owner decision 5 (2026-10-11): stay on GitHub issues
+
+conformance:                              # agent-workflow.md section 9 at dd9fd15 (seed-history/minion-agent-specifics.md):
+  families: [runtime, session, agent]     # "There are exactly three canonical behavior families"
+  support: [schema]                       # "`conformance/schema` is support infrastructure, not a fourth behavior family"
+
+agents:
+  claude: {roles: [coordinator, shared-contract-owner, implementer:python], harness: claude-code, default_pane: "w1:p1"}
+  codex:  {roles: [reviewer, implementer:rust], harness: codex, default_pane: "w1:p2"}
+
+implementation_order: [python, rust]
+
+taxonomy_aliases:
+  PI_BEHAVIOR_UNCERTAIN: AUTHORITY_BEHAVIOR_UNCERTAIN
+  PI_PARITY_DEFECT: AUTHORITY_PARITY_DEFECT
+
+hazard_families: [F1-js-number, F2-js-string-utf16, F3-unicode-icu, F4-async-order, F5-error-coercion, F6-object-order, F7-schema-runtime-domain]
+
+gates:                                    # free-text until the kit launchers land (P3)
+  python: {launcher: "minion-agent-python: eval build.sh --env; pytest, coverage 100%, ruff, mypy, schema + manifest validation, canonical suites (pinned ICU)", tiers: [g0, g1, g2, g3]}
+  rust:   {launcher: ".agents/gate-preflight.ps1 then cargo fmt/clippy/test/doc, xtask conformance verify (CARGO_BUILD_JOBS=4, shared target per platform)", tiers: [g0, g1, g2, g3]}
+
+delegation: {source: "https://github.com/EGAILab/minion-agent/issues/75", routing: false}   # routing: true once the #75 amendment (decision 3.1) is confirmed by the Owner
+wp_kinds_enabled: [semantic, delta, process, scoping, status]   # Owner decision 2 (2026-10-11); schema enforcement lands in P2
+environment: ../.agents/project-environment.ps1

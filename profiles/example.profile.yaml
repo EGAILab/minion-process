@@ -1,0 +1,38 @@
+# Minion-Process profile -- the only project-specific process file.
+# Copy to <docs repo>/process/profile.yaml and run: python -m minion_process profile validate process/profile.yaml
+kit: {version: "0.1.0", source: EGAILab/minion-process}
+project: example-project
+
+authority:                                # semantic authority chain, highest first
+  - {kind: source, name: upstream, pin: "0000000000000000000000000000000000000000", verify: git-sha}   # quote a pin: an all-digit SHA would parse as a number
+  - {kind: manifest, path: ../example/parity-manifest.yaml}
+  - {kind: spec, path: spec/}
+  - {kind: conformance, path: ../example/conformance/}
+  - {kind: register, name: divergences, path: assurance/divergences.md}
+
+repos:
+  code: {path: ../example, default_branch: main, github: ORG/example}
+  docs: {path: ., default_branch: main, github: ORG/example-docs}
+
+coordination: {backend: github-issue, repo: ORG/example}    # or {backend: state-file, path: process/state/}
+
+conformance:                              # WORKFLOW.md section 9: behavior families vs support infrastructure
+  families: [runtime, session]
+  support: [schema]
+
+agents:                                   # panes are defaults only; reply-to is recorded per dispatch
+  claude: {roles: [coordinator, shared-contract-owner, implementer:python], harness: claude-code, default_pane: "w1:p1"}
+  codex:  {roles: [reviewer, implementer:rust], harness: codex, default_pane: "w1:p2"}
+
+implementation_order: [python, rust]
+
+taxonomy_aliases: {}                      # historical names -> generic classes (finding-taxonomy.md)
+hazard_families: [F1-js-number, F2-js-string-utf16, F3-unicode-icu, F4-async-order, F5-error-coercion, F6-object-order, F7-schema-runtime-domain]
+
+gates:                                    # launchers become kit launchers with self-tests in P3
+  python: {launcher: "scripts/gates-python.sh", tiers: [g0, g1, g2, g3]}
+  rust:   {launcher: "scripts/gates-rust.sh", tiers: [g0, g1, g2, g3]}
+
+delegation: {source: "https://github.com/ORG/example/issues/1", routing: false}
+wp_kinds_enabled: [semantic, delta, process, scoping, status]
+environment: .agents/project-environment.sh
