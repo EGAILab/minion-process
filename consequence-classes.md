@@ -47,8 +47,13 @@ read-only reports, registry syncs the tool validates, scoping artifacts.
   consequence: {class: mechanical, rule: CP-0}
   ```
 
+- **A pause before intake keeps intake pending.** A new WP that must stop for the Owner or wait for a
+  trigger before it can be classified records `classification_pending: true` when it leaves `SCOPING`;
+  the `apply` guard refuses its first working-state entry until `kind` and `consequence` are recorded.
+- **Classification is sticky.** Once recorded, `kind` and `consequence` are never removed or nulled.
+  Lowering the class by deleting it and re-adding a lighter one is refused as a downgrade.
 - **Confirmation.** The first independent review confirms or corrects the class as a required line of
-  its record (`templates/review-record.md`); the coordinator records `confirmed_by`.
+  its record (`templates/review-record.md` `CLASS CONFIRMATION`); the coordinator records `confirmed_by`.
 - **Upgrade is automatic and recorded.** Any finding whose subject matches a predicate (a containment
   escape, an acceptance written on a non-approval, a substituted pin, a vacuous comparator) sets the
   class to governing with the finding ID as the rule and in `upgraded_by`. The tool refuses a lighter

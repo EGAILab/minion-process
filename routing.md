@@ -14,7 +14,7 @@ asking. The Owner decides semantics, scope and risk.
 
 | Rule | Situation | Route (no Owner question) |
 |---|---|---|
-| `RT-1` | targeted closure returns new findings on an agreed checkpoint | one fix pass per round; the §11.8.10 invalidation rule fires on the second failure of the same material finding |
+| `RT-1` | a targeted closure on an agreed checkpoint returns new findings, or the same finding survives | one fix pass per round; the §11.8.10 invalidation rule fires on the second failure of the same material finding |
 | `RT-2` | a semantically independent work package is idle while the other agent works | progress it, recording the dependency edges (§11.15) |
 | `RT-3` | the reviewer loses the environment the review needs | `HANDOFF_BLOCKED`: record the block, route the access question to the Owner, re-dispatch the **unchanged** candidate when access is confirmed (§11.11) |
 | `RT-4` | a **mechanical** work package has had two consecutive rounds without new discriminating evidence | file one Owner risk question with the default the process would otherwise take, and continue on that default unless the Owner answers otherwise within the round |

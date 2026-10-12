@@ -82,7 +82,14 @@ def classification_guard(old: dict[str, Any], new: dict[str, Any]) -> str | None
       `governance_source`. The tool checks presence; the agent validates the source (§11.10).
     - **Closure routes by kind.** `FINAL_CONTRACT_REVIEW -> CLOSED` (§10.2) is for `process`/`status`
       kinds; `SCOPING -> CLOSED` (§10.3) is for `scoping`. A semantic or delta WP closes through
-      `CLOSURE_REVIEW` only."""
+      `CLOSURE_REVIEW` only.
+    - **Classification is sticky** (`PROC-KIT-P2-R001`): once recorded, `kind` and `consequence` are never
+      removed or nulled, so a class cannot be laundered through an unclassified state; any effective
+      lowering from governing is the Owner-only downgrade.
+    - **Pending intake survives a pause** (`PROC-KIT-P2-R003`): a new v2 WP that leaves `SCOPING` for
+      `BLOCKED_FOR_OWNER` or `WAITING_FOR_TRIGGER` unclassified records `classification_pending: true`,
+      and may not enter a working state until it is classified. WPs opened before kit 0.2.0 carry no
+      flag and are not re-classified mid-flight."""
     old_status, new_status = old["status"], new["status"]
     kind_old, kind_new = old.get("kind"), new.get("kind")
     class_old = (
@@ -92,19 +99,38 @@ def classification_guard(old: dict[str, Any], new: dict[str, Any]) -> str | None
         (new.get("consequence") or {}).get("class") if isinstance(new.get("consequence"), dict) else None
     )
     lean = new.get("schema_version", 1) >= 2  # v1 (pre-lean) states are legacy; intake applies from v2
-    if (
-        lean
-        and old_status == "SCOPING"
-        and new_status not in INTAKE_EXEMPT
-        and (kind_new is None or class_new is None)
-    ):
+    unclassified_new = kind_new is None or class_new is None
+    if kind_old is not None and kind_new is None:
+        return "classification is sticky: `kind` cannot be removed or nulled once recorded (§14)"
+    if class_old is not None and class_new is None:
+        return "classification is sticky: `consequence` cannot be removed or nulled once recorded (§14)"
+    if lean and old_status == "SCOPING" and new_status not in INTAKE_EXEMPT and unclassified_new:
         return (
             "intake requires classification: record `kind` and `consequence: {class, rule}` before leaving "
             "SCOPING (§14; consequence-classes.md)"
         )
+    if (
+        lean
+        and old_status == "SCOPING"
+        and new_status in ("BLOCKED_FOR_OWNER", "WAITING_FOR_TRIGGER")
+        and unclassified_new
+        and new.get("classification_pending") is not True
+    ):
+        return (
+            "an unclassified WP leaving SCOPING for a pause state records `classification_pending: true` "
+            "so intake still applies when it resumes (§14)"
+        )
+    if old.get("classification_pending") is True and unclassified_new:
+        if new_status not in INTAKE_EXEMPT:
+            return (
+                "pending intake: this WP was never classified; record `kind` and `consequence` before it "
+                "enters a working state (§14)"
+            )
+        if new.get("classification_pending") is not True:
+            return "classification_pending cannot be dropped while the WP is unclassified (§14)"
     if kind_old is not None and kind_new != kind_old and old_status != "SCOPING":
         return f"kind is fixed after intake ({kind_old}); a different kind is a new work package (§14)"
-    if class_old == "governing" and class_new == "mechanical":
+    if class_old == "governing" and class_new != "governing":
         downgrade = (new.get("consequence") or {}).get("downgrade")
         source = new.get("governance_source")
         if not (

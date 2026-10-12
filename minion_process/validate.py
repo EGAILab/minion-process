@@ -302,20 +302,31 @@ def _classification(c: _Checker, workflow: dict[str, Any], status: str, lean: bo
     """`kind`, `consequence`, `skipped` and `history.routes` (`coordination-state.md` §14, kit 0.2.0).
 
     All four are optional in the state shape, so work packages opened before kit 0.2.0 stay valid; the
-    `apply` guard (`ops.classification_guard`) requires `kind` and `consequence` from intake on. When
-    present, every value is checked: a malformed value is an error, never treated as absent."""
-    kind = workflow.get("kind")
-    if kind is not None and not (isinstance(kind, str) and kind in KINDS):
-        c.error("kind", f"must be one of {', '.join(KINDS)}, got {kind!r}")
-        kind = None
-    consequence = workflow.get("consequence")
+    `apply` guard (`ops.classification_guard`) requires `kind` and `consequence` from intake on. Presence
+    is decided by the key, not by truthiness: a supplied `null` is a malformed value and an error, never
+    absence (`PROC-KIT-P2-R002`)."""
+    kind: Any = None
+    if "kind" in workflow:
+        kind = workflow["kind"]
+        if not (isinstance(kind, str) and kind in KINDS):
+            c.error("kind", f"must be one of {', '.join(KINDS)}, got {kind!r}")
+            kind = None
     klass: str | None = None
-    if consequence is not None:
+    if "consequence" in workflow:
+        consequence = workflow["consequence"]
         if not isinstance(consequence, dict):
             c.error("consequence", f"must be a mapping, got {type(consequence).__name__}")
         else:
             klass = _consequence(c, consequence)
-    if lean and kind is None and consequence is None:
+    if "classification_pending" in workflow:
+        pending = workflow["classification_pending"]
+        if not isinstance(pending, bool):
+            c.error("classification_pending", f"must be a boolean, got {pending!r}")
+        elif pending and ("kind" in workflow or "consequence" in workflow):
+            c.error(
+                "classification_pending", "a classified WP is not pending classification; drop the flag (§14)"
+            )
+    if lean and "kind" not in workflow and "consequence" not in workflow:
         c.warn("kind", "kind and consequence not recorded; kit 0.2.0 classifies every WP at intake (§14)")
 
     if kind in GOVERNING_KINDS and klass == "mechanical":
@@ -332,18 +343,22 @@ def _classification(c: _Checker, workflow: dict[str, Any], status: str, lean: bo
             "a mechanical WP has no convergence; a firing trigger upgrades the class (§14)",
         )
 
-    skipped = workflow.get("skipped")
-    if skipped is not None:
+    if "skipped" in workflow:
+        skipped = workflow["skipped"]
         if not isinstance(skipped, list):
             c.error("skipped", "must be a list of {stage, rule, measured_rows, reviewer}")
         else:
-            if skipped and klass == "governing":
-                c.error("skipped", "no stage is skipped on a governing change (§14, record §6.3)")
+            if skipped and klass != "mechanical":
+                c.error(
+                    "skipped",
+                    "a stage is skipped only on a WP classified mechanical; never on a governing or "
+                    "unclassified one (§14, record §6.3)",
+                )
             for i, entry in enumerate(skipped):
                 _skip(c, f"skipped[{i}]", entry)
 
     history = workflow.get("history")
-    if isinstance(history, dict) and history.get("routes") is not None:
+    if isinstance(history, dict) and "routes" in history:
         routes = history["routes"]
         if not isinstance(routes, list):
             c.error("history.routes", "must be a list of {rule, at, reason}")
@@ -378,8 +393,8 @@ def _consequence(c: _Checker, consequence: dict[str, Any]) -> str | None:
             c.error(f"consequence.{key}", "must be a non-empty string")
     if "upgraded_by" in consequence:
         c.id_list("consequence.upgraded_by", consequence["upgraded_by"], _finding_id, "finding ID string")
-    downgrade = consequence.get("downgrade")
-    if downgrade is not None:
+    if "downgrade" in consequence:
+        downgrade = consequence["downgrade"]
         if not isinstance(downgrade, dict):
             c.error("consequence.downgrade", "must be a mapping {owner_decision, reviewer}")
         else:

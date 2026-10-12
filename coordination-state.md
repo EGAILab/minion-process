@@ -775,12 +775,22 @@ workflow:
   `measured_rows` and the consenting `reviewer`; a governing WP has no skipped stage.
 - `history.routes` entries name a rule `RT-1`–`RT-6`, `at` and `reason`.
 - All four fields are optional in the shape, so WPs opened before kit 0.2.0 stay valid; a v2 state
-  without `kind`/`consequence` draws a warning.
+  without `kind`/`consequence` draws a warning. **Presence is decided by the key**: a supplied `null`
+  in any of these positions is a malformed value and an error, never absence (`PROC-KIT-P2-R002`).
+- `classification_pending: true` marks a new WP that paused (`BLOCKED_FOR_OWNER`, `WAITING_FOR_TRIGGER`)
+  before intake; it is a boolean and never coexists with `kind`/`consequence`.
+- A stage is skipped only on a WP classified `mechanical`; an unclassified or governing WP has no
+  `skipped` entries.
 
 ### 14.2 Transition rules (`apply` guard)
 
 - **Intake.** Leaving `SCOPING` for an active working state requires `kind` and `consequence` in the
-  intended state.
+  intended state. Leaving `SCOPING` unclassified for a pause state requires `classification_pending:
+  true`; a WP carrying that flag cannot enter a working state until classified, and cannot drop the
+  flag while unclassified (`PROC-KIT-P2-R003`).
+- **Classification is sticky.** Once recorded, `kind` and `consequence` are never removed or nulled;
+  any effective lowering from `governing` (to `mechanical` or to absent) is the Owner-only downgrade
+  (`PROC-KIT-P2-R001`).
 - **Kind is fixed after intake.** A different kind is a new WP.
 - **Downgrade is Owner-only.** governing → mechanical requires `consequence.downgrade` and a recorded
   `governance_source`; the tool checks presence, the agent validates the source (§11.10).

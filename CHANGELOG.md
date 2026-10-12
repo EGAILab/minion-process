@@ -20,6 +20,10 @@ Coordination `minion-agent#212` (PROC-KIT-P2).
 - `templates/coordination-issue.md` carries `kind` and `consequence`.
 - `lessons/PROC-KIT-ROUTE-BY-CONSEQUENCE.md` (record §6.2–§6.3, verbatim).
 - `profiles/minion-agent.profile.yaml`: `delegation.routing: true` (Amendment 2 posted).
+- Review 1 (`PROC-KIT-P2-R001`–`R003`): classification is sticky (no removal or null; every effective
+  lowering is the Owner-only downgrade); supplied `null` in the new fields is a diagnostic, not absence;
+  `classification_pending` keeps intake pending across a pause; a skip needs an explicit `mechanical`
+  class; `RT-1` wording aligned with Amendment 2; `CLASS CONFIRMATION` line in the review-record template.
 - Not yet: `convergence counters`, structured review-record header, metrics, launchers, replay (P3);
   state-file backend and profile-driven repositories (P3/P4).
 

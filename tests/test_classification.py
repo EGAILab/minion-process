@@ -162,8 +162,14 @@ def test_guard_requires_classification_at_intake() -> None:
     assert "intake requires classification" in str(classification_guard(old, new))
     legacy = workflow(status="SCOPING")  # schema v1: pre-kit WPs are not re-classified mid-flight
     assert classification_guard(legacy, {**legacy, "status": "CONTRACT_DRAFT"}) is None
-    assert classification_guard(old, {**old, "status": "BLOCKED_FOR_OWNER"}) is None
-    assert classification_guard(old, {**old, "status": "WAITING_FOR_TRIGGER"}) is None
+    assert (
+        classification_guard(old, {**old, "status": "BLOCKED_FOR_OWNER", "classification_pending": True})
+        is None
+    )
+    assert (
+        classification_guard(old, {**old, "status": "WAITING_FOR_TRIGGER", "classification_pending": True})
+        is None
+    )
     assert classification_guard(old, {**new, **CLASSIFIED}) is None
 
 
