@@ -9,7 +9,9 @@ branches, the **agents** and the roles they hold (`roles/`), the taxonomy **alia
 coordinator", "the reviewer", "the first/second implementation language", read the profile's values.
 **Numbering:** sections keep the numbers of Minion-Agent's `agent-workflow.md`, which this core was
 split from, so cross-references in the other kit files and in historical records stay valid. Incident
-narratives moved verbatim to `lessons/<ID>.md`; each rule that was paid for by one links to it.
+narratives moved verbatim to `lessons/<ID>.md`; each rule that was paid for by one links to it. The
+project-specific sentences that became profile values are preserved verbatim in
+`seed-history/minion-agent-specifics.md`, with the profile field each one maps to.
 **Role files** (`CLAUDE.md`, `AGENTS.md`, …) of a consuming project add only ownership paths and
 environment rules, and point here for everything else.
 
@@ -227,6 +229,12 @@ or iterating its contents. An iterable scalar or mapping must not accidentally s
 field. Keep negative probes for plausible malformed container shapes alongside the validator.
 
 ## 9. Canonical conformance
+
+The project declares its **canonical behavior families** and its **support infrastructure** in the
+profile (`conformance.families`, `conformance.support`). The families are the only behavior families;
+a support directory (schemas, fixtures, runner helpers) is not an additional behavior family and
+never carries behavior of its own. Minion-Agent declares exactly three families, `runtime`, `session`
+and `agent`, with `schema` as support (`seed-history/minion-agent-specifics.md`).
 
 Canonical data is language-neutral. Language-specific runners are thin adapters:
 

@@ -20,7 +20,13 @@ Seeded from `EGAILab/minion-agent-docs` at `dd9fd15188d89597fd09a538c2652788604d
   the field list the workflow already required.
 - `roles/`: generic role texts for coordinator, shared-contract owner, implementer and reviewer.
 - `profiles/profile.schema.json`, `profiles/example.profile.yaml`, `profiles/minion-agent.profile.yaml`.
-- `minion_process profile validate <path>`: validates a profile against the schema's rules offline.
-  Everything else in the CLI is unchanged from the Minion-Agent tool.
+  The profile declares the project's canonical behavior families and support infrastructure
+  (`conformance`), which `WORKFLOW.md` §9 refers to.
+- `seed-history/minion-agent-specifics.md`: the Minion-Agent-specific sentences that became profile
+  values, verbatim, with the field each maps to (review 1, `PROC-KIT-P1-R003`).
+- `minion_process profile validate <path>`: validates a profile against the schema's rules offline;
+  total on malformed values (`PROC-KIT-P1-R001`); the schema expresses role coverage and independence
+  as constraints and both validators are tested differentially (`PROC-KIT-P1-R002`). Everything else in
+  the CLI is unchanged from the Minion-Agent tool.
 - Not yet: the `state-file` backend, profile-driven repository names, kinds and consequence classes
   (P2), structured review-record header, metrics, composite verbs, launchers, `replay/` (P3).

@@ -24,6 +24,7 @@ hazards/hazard-families.md          reusable runtime hazard families F1–F7
 templates/                          feasibility matrix, hand-off, review record, convergence record, closure record, coordination issue
 roles/                              coordinator, shared-contract owner, implementer, reviewer (generic)
 lessons/                            incident records by ID, linked from the rules they support
+seed-history/                       project-specific seed text that became profile values, verbatim
 design/                             CLI design and certification-registry design
 profiles/                           profile.schema.json and example profiles (the live profile lives in the consuming project)
 minion_process/                     the CLI (one code base; backends: github-issue today, state-file planned)

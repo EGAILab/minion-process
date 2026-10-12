@@ -1,5 +1,10 @@
-"""`profile validate`: every rule of `profiles/profile.schema.json`, as implemented by
-`minion_process.profile`, with the example profiles as positives and one mutation per rule as negatives."""
+"""`profile validate`: every rule of `profiles/profile.schema.json` as implemented by
+`minion_process.profile`, with the shipped profiles as positives and one mutation per rule as negatives.
+
+PROC-KIT-P1-R001: non-string values in enum positions (list, mapping, null, bool, int) are diagnostics,
+never a raise, through the function and the CLI. PROC-KIT-P1-R002: the JSON schema (checked with
+`jsonschema`) and the Python validator accept and reject the same profiles over the whole mutation
+neighbourhood, except for the named SUPPLEMENTAL_RULES, which only the Python side can express."""
 
 from __future__ import annotations
 
@@ -11,14 +16,22 @@ from typing import Any
 
 import pytest
 import yaml
+from jsonschema import Draft202012Validator
 
 from minion_process.cli import main
-from minion_process.profile import TOP_OPTIONAL, TOP_REQUIRED, load_profile, validate_profile
+from minion_process.profile import (
+    SUPPLEMENTAL_RULES,
+    TOP_OPTIONAL,
+    TOP_REQUIRED,
+    load_profile,
+    validate_profile,
+)
 from minion_process.validate import errors
 
 KIT = Path(__file__).resolve().parents[1]
 PROFILES = KIT / "profiles"
 SCHEMA = json.loads((PROFILES / "profile.schema.json").read_text(encoding="utf-8"))
+SCHEMA_VALIDATOR = Draft202012Validator(SCHEMA)
 
 
 def good() -> dict[str, Any]:
@@ -31,16 +44,29 @@ def problems(data: Any) -> list[str]:
     return [str(p) for p in validate_profile(data)]
 
 
+def schema_rejects(data: Any) -> bool:
+    return not SCHEMA_VALIDATOR.is_valid(data)
+
+
+def both(data: Any) -> tuple[bool, bool]:
+    """(python rejects, schema rejects) -- the differential observation."""
+    return bool(errors(validate_profile(data))), schema_rejects(data)
+
+
 @pytest.mark.parametrize("name", ["example.profile.yaml", "minion-agent.profile.yaml"])
-def test_shipped_profiles_are_valid(name: str) -> None:
+def test_shipped_profiles_are_valid_for_both_validators(name: str) -> None:
     data, found = load_profile(PROFILES / name)
     assert data is not None and found == []
+    assert not schema_rejects(data)
 
 
-def test_schema_and_implementation_agree_on_the_top_level() -> None:
+def test_schema_and_implementation_agree_on_the_top_level_and_name_the_supplemental_rules() -> None:
+    Draft202012Validator.check_schema(SCHEMA)
     assert tuple(SCHEMA["required"]) == TOP_REQUIRED
     assert set(SCHEMA["properties"]) == set(TOP_REQUIRED) | set(TOP_OPTIONAL)
     assert SCHEMA["additionalProperties"] is False
+    for rule in SUPPLEMENTAL_RULES:
+        assert rule in SCHEMA["description"], rule
 
 
 def test_kit_version_matches_pyproject_and_changelog() -> None:
@@ -54,12 +80,14 @@ def test_kit_version_matches_pyproject_and_changelog() -> None:
 def test_not_a_mapping_and_unknown_or_missing_keys() -> None:
     assert problems([]) == ["ERROR: profile: must be a mapping, got list"]
     assert problems({1: 2}) == ["ERROR: profile: keys must be strings"]
+    assert both([]) == (True, True)
     data = good()
     data["surprise"] = 1
     del data["delegation"]
     found = problems(data)
     assert "ERROR: delegation: required" in found
     assert "ERROR: profile: unknown keys ['surprise']" in found
+    assert both(data) == (True, True)
 
 
 def mutate(path: list[str | int], value: Any, *, delete: bool = False) -> dict[str, Any]:
@@ -74,66 +102,119 @@ def mutate(path: list[str | int], value: Any, *, delete: bool = False) -> dict[s
     return data
 
 
-@pytest.mark.parametrize(
-    ("path", "value", "expected"),
-    [
-        (["kit"], "0.1.0", "kit: must be a mapping"),
-        (["kit", "extra"], 1, "kit: unknown keys ['extra']"),
-        (["kit", "version"], "1.0", "kit.version: must be MAJOR.MINOR.PATCH"),
-        (["kit", "source"], "no-slash", "kit.source: must be owner/repo"),
-        (["project"], "Bad Name", "project: must be a lower-case kebab-case name"),
-        (["project"], "", "project: must be a non-empty string"),
-        (["authority"], {}, "authority: must be a list"),
-        (["authority"], [], "authority: needs at least one entry"),
-        (["authority", 0], "pi", "authority[0]: must be a mapping"),
-        (["authority", 0, "kind"], "oracle", "authority[0].kind: must be one of"),
-        (["authority", 0, "name"], "", "authority[0].name: must be a non-empty string"),
-        (["repos"], [], "repos: must be a mapping"),
-        (["repos"], {}, "repos: needs at least one repository"),
-        (["repos", "code"], None, "repos.code: must be a mapping"),
-        (["repos", "code", "github"], "x", "repos.code.github: must be owner/repo"),
-        (["repos", "code", "default_branch"], 3, "repos.code.default_branch: must be a non-empty string"),
-        (["coordination"], 1, "coordination: must be a mapping"),
-        (["coordination", "backend"], "chat", "coordination.backend: must be one of"),
-        (["coordination", "repo"], "", "coordination.repo: must be a non-empty string"),
-        (["agents"], [], "agents: must be a mapping"),
-        (["agents", "codex"], 1, "agents.codex: must be a mapping"),
-        (["agents", "codex", "harness"], "", "agents.codex.harness: must be a non-empty string"),
-        (["agents", "codex", "default_pane"], "", "agents.codex.default_pane: must be a non-empty string"),
-        (["agents", "codex", "roles"], "reviewer", "agents.codex.roles: must be a list"),
-        (["agents", "codex", "roles"], [], "agents.codex.roles: needs at least 1 item(s)"),
-        (["agents", "codex", "roles"], ["reviewer", "reviewer"], "agents.codex.roles: items must be unique"),
-        (["agents", "codex", "roles"], ["reviewer", "janitor"], "agents.codex.roles[1]: unknown role"),
-        (["taxonomy_aliases"], [], "taxonomy_aliases: must be a mapping"),
-        (["taxonomy_aliases"], {"bad": "AUTHORITY_PARITY_DEFECT"}, "taxonomy_aliases.bad: alias must be"),
-        (["taxonomy_aliases"], {"PI_X": "SOMETHING"}, "taxonomy_aliases.PI_X: must map to one of"),
-        (["hazard_families"], [1], "hazard_families[0]: must be a non-empty string"),
-        (["gates"], 1, "gates: must be a mapping"),
-        (["gates", "python"], 1, "gates.python: must be a mapping"),
-        (["gates", "python", "launcher"], "", "gates.python.launcher: must be a non-empty string"),
-        (["gates", "python", "tiers"], ["g9"], "gates.python.tiers[0]: must be one of"),
-        (["delegation"], "x", "delegation: must be a mapping"),
-        (["delegation", "routing"], "yes", "delegation.routing: must be true or false"),
-        (["wp_kinds_enabled"], ["magic"], "wp_kinds_enabled[0]: must be one of"),
-        (["implementation_order"], ["Python"], "implementation_order[0]: not a language name"),
-        (["implementation_order"], ["go"], "implementation_order[0]: no agent holds `implementer:go`"),
-        (["environment"], "", "environment: must be a non-empty string"),
-    ],
-)
-def test_one_mutation_per_rule(path: list[str | int], value: Any, expected: str) -> None:
-    found = problems(mutate(path, value))
+MUTATIONS: list[tuple[list[str | int], Any, str]] = [
+    (["kit"], "0.1.0", "kit: must be a mapping"),
+    (["kit", "extra"], 1, "kit: unknown keys ['extra']"),
+    (["kit", "version"], "1.0", "kit.version: must be MAJOR.MINOR.PATCH"),
+    (["kit", "source"], "no-slash", "kit.source: must be owner/repo"),
+    (["project"], "Bad Name", "project: must be a lower-case kebab-case name"),
+    (["project"], "", "project: must be a non-empty string"),
+    (["authority"], {}, "authority: must be a list"),
+    (["authority"], [], "authority: needs at least one entry"),
+    (["authority", 0], "pi", "authority[0]: must be a mapping"),
+    (["authority", 0, "kind"], "oracle", "authority[0].kind: must be one of"),
+    (["authority", 0, "name"], "", "authority[0].name: must be a non-empty string"),
+    (["authority", 0, "name"], "   ", "authority[0].name: must be a non-empty string"),
+    (["repos"], [], "repos: must be a mapping"),
+    (["repos"], {}, "repos: needs at least one repository"),
+    (["repos", "code"], None, "repos.code: must be a mapping"),
+    (["repos", "code", "github"], "x", "repos.code.github: must be owner/repo"),
+    (["repos", "code", "default_branch"], 3, "repos.code.default_branch: must be a non-empty string"),
+    (["coordination"], 1, "coordination: must be a mapping"),
+    (["coordination", "backend"], "chat", "coordination.backend: must be one of"),
+    (["coordination", "repo"], "", "coordination.repo: must be a non-empty string"),
+    (["coordination"], {"backend": "state-file", "path": "state/", "repo": False}, "coordination.repo: must"),
+    (["coordination"], {"backend": "github-issue", "repo": "a/b", "path": " "}, "coordination.path: must"),
+    (["conformance"], [], "conformance: must be a mapping"),
+    (["conformance"], {"support": ["schema"]}, "conformance.families: required"),
+    (["conformance", "families"], [], "conformance.families: needs at least 1 item(s)"),
+    (["conformance", "support"], [""], "conformance.support[0]: must be a non-empty string"),
+    (["agents"], [], "agents: must be a mapping"),
+    (["agents", "codex"], 1, "agents.codex: must be a mapping"),
+    (["agents", "codex", "harness"], "", "agents.codex.harness: must be a non-empty string"),
+    (["agents", "codex", "default_pane"], "", "agents.codex.default_pane: must be a non-empty string"),
+    (["agents", "codex", "roles"], "reviewer", "agents.codex.roles: must be a list"),
+    (["agents", "codex", "roles"], [], "agents.codex.roles: needs at least 1 item(s)"),
+    (["agents", "codex", "roles"], ["reviewer", "reviewer"], "agents.codex.roles: items must be unique"),
+    (["agents", "codex", "roles"], ["reviewer", "janitor"], "agents.codex.roles[1]: unknown role"),
+    (["taxonomy_aliases"], [], "taxonomy_aliases: must be a mapping"),
+    (["taxonomy_aliases"], {"bad": "AUTHORITY_PARITY_DEFECT"}, "taxonomy_aliases.bad: alias must be"),
+    (["taxonomy_aliases"], {"PI_X": "SOMETHING"}, "taxonomy_aliases.PI_X: must be one of"),
+    (["hazard_families"], [1], "hazard_families[0]: must be a non-empty string"),
+    (["gates"], 1, "gates: must be a mapping"),
+    (["gates", "python"], 1, "gates.python: must be a mapping"),
+    (["gates", "python", "launcher"], "", "gates.python.launcher: must be a non-empty string"),
+    (["gates", "python", "tiers"], ["g9"], "gates.python.tiers[0]: must be one of"),
+    (["gates", "python", "tiers"], [], "gates.python.tiers: needs at least 1 item(s)"),
+    (["delegation"], "x", "delegation: must be a mapping"),
+    (["delegation", "routing"], "yes", "delegation.routing: must be true or false"),
+    (["wp_kinds_enabled"], ["magic"], "wp_kinds_enabled[0]: must be one of"),
+    (["implementation_order"], ["Python"], "implementation_order[0]: not a language name"),
+    (["environment"], "", "environment: must be a non-empty string"),
+]
+
+ENUM_POSITIONS: list[list[str | int]] = [
+    ["authority", 0, "kind"],
+    ["coordination", "backend"],
+    ["taxonomy_aliases", "PI_X"],
+    ["gates", "python", "tiers", 0],
+    ["wp_kinds_enabled", 0],
+    ["agents", "codex", "roles", 0],
+]
+MALFORMED_SHAPES: list[Any] = [[], ["reviewer"], {}, {"a": 1}, None, True, 0, 1.5]
+
+
+@pytest.mark.parametrize(("path", "value", "expected"), MUTATIONS)
+def test_one_mutation_per_rule_and_both_validators_reject_it(
+    path: list[str | int], value: Any, expected: str
+) -> None:
+    data = mutate(path, value)
+    found = problems(data)
     assert any(expected in p for p in found), found
+    assert both(data) == (True, True)
+
+
+def _shape_id(shape: Any) -> str:
+    return type(shape).__name__ + (str(len(shape)) if hasattr(shape, "__len__") else str(shape))
+
+
+@pytest.mark.parametrize("shape", MALFORMED_SHAPES, ids=_shape_id)
+@pytest.mark.parametrize("path", ENUM_POSITIONS, ids=lambda p: ".".join(map(str, p)))
+def test_r001_non_string_enum_values_are_diagnostics(path: list[str | int], shape: Any) -> None:
+    data = good()
+    data.setdefault("taxonomy_aliases", {})["PI_X"] = "AUTHORITY_PARITY_DEFECT"
+    node: Any = data
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = shape
+    found = problems(data)  # must not raise
+    joined = ".".join(str(k) for k in path).replace(".0", "[0]")
+    assert any(p.startswith("ERROR: ") and joined.split("[")[0] in p for p in found), found
+    assert both(data) == (True, True)
+
+
+def test_r001_through_the_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    data = good()
+    data["coordination"]["backend"] = ["github-issue"]
+    path = tmp_path / "enum-list.yaml"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert main(["profile", "validate", str(path)]) == 1
+    out = capsys.readouterr().out
+    assert "ERROR: coordination.backend: must be a string, got list" in out
+    assert out.strip().endswith("INVALID")
 
 
 def test_authority_entry_needs_path_or_pin_and_rejects_unknown_keys() -> None:
     data = good()
     data["authority"][0] = {"kind": "source"}
     assert "ERROR: authority[0]: needs `path` or `pin`" in problems(data)
+    assert both(data) == (True, True)
     data["authority"][0] = {"kind": "source", "pin": "x", "url": "y"}
     assert "ERROR: authority[0]: unknown keys ['url']" in problems(data)
+    assert both(data) == (True, True)
 
 
-def test_coordination_backends_need_their_locator() -> None:
+def test_coordination_backends_need_their_locator_and_validate_inactive_ones() -> None:
     assert "ERROR: coordination.repo: required for the github-issue backend" in problems(
         mutate(["coordination"], {"backend": "github-issue"})
     )
@@ -141,18 +222,33 @@ def test_coordination_backends_need_their_locator() -> None:
         mutate(["coordination"], {"backend": "state-file"})
     )
     assert problems(mutate(["coordination"], {"backend": "state-file", "path": "process/state/"})) == []
+    state_file = mutate(["coordination"], {"backend": "state-file", "path": "process/state/"})
+    assert both(state_file) == (False, False)
     assert "ERROR: coordination.path: must be a non-empty string" in problems(
         mutate(["coordination"], {"backend": "state-file", "path": ""})
     )
+    # R002: a locator the selected backend does not use is still validated
+    inactive = mutate(["coordination"], {"backend": "state-file", "path": "state/", "repo": "not-a-repo"})
+    assert "ERROR: coordination.repo: must be owner/repo, got 'not-a-repo'" in problems(inactive)
+    assert both(inactive) == (True, True)
 
 
-def test_agent_role_coverage_and_independence() -> None:
+def test_conformance_support_is_not_a_family() -> None:
+    data = mutate(["conformance"], {"families": ["runtime", "schema"], "support": ["schema"]})
+    assert "ERROR: conformance.support[0]: 'schema' is also a behavior family; it cannot be both" in problems(
+        data
+    )
+    assert both(data) == (True, False)  # supplemental rule: Python only
+
+
+def test_agent_role_coverage_and_independence_in_both_validators() -> None:
     data = good()
     del data["agents"]["codex"]
     found = problems(data)
     assert "ERROR: agents: needs at least two agents: review is independent of authorship" in found
     assert "ERROR: agents: no agent holds `reviewer`" in found
     assert "ERROR: implementation_order[1]: no agent holds `implementer:rust`" in found
+    assert both(data) == (True, True)
     data = good()
     data["agents"]["claude"]["roles"] = ["shared-contract-owner", "reviewer"]
     data["agents"]["codex"]["roles"] = ["reviewer", "shared-contract-owner"]
@@ -161,9 +257,20 @@ def test_agent_role_coverage_and_independence() -> None:
     assert "ERROR: agents: no agent holds `coordinator`" in found
     assert "ERROR: agents: no agent holds an `implementer:<language>` role" in found
     assert "ERROR: agents: every reviewer also holds `shared-contract-owner`" in " ".join(found)
-    data = good()
+    assert both(data) == (True, True)
+    data = good()  # R002's own observation: a second agent with no reviewer role
     data["agents"]["codex"]["roles"] = ["implementer:rust"]
     assert "ERROR: agents: no agent holds `reviewer`" in problems(data)
+    assert both(data) == (True, True)
+    data = good()  # independence alone: the only reviewer also owns the shared contract
+    data["agents"]["codex"]["roles"] = ["reviewer", "shared-contract-owner", "implementer:rust"]
+    assert both(data) == (True, True)
+
+
+def test_supplemental_rule_implementation_order_is_python_only() -> None:
+    data = mutate(["implementation_order"], ["go"])
+    assert "ERROR: implementation_order[0]: no agent holds `implementer:go`" in problems(data)
+    assert both(data) == (True, False)
 
 
 def test_a_broken_agent_entry_does_not_hide_the_coverage_checks() -> None:
@@ -172,6 +279,7 @@ def test_a_broken_agent_entry_does_not_hide_the_coverage_checks() -> None:
     found = problems(data)
     assert "ERROR: agents.codex.roles: must be a list, got dict" in found
     assert "ERROR: agents: no agent holds `reviewer`" in found
+    assert both(data) == (True, True)
 
 
 def test_load_profile_reports_unreadable_and_unparsable_files(tmp_path: Path) -> None:

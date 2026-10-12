@@ -1,7 +1,13 @@
 """`minion-process profile validate`: offline validation of a project's `profile.yaml`
-(`profiles/profile.schema.json`). It implements exactly the schema's rules, is total (diagnostics,
-never a raise, for any YAML input) and fails closed (an unknown key or a malformed value is an error,
-never ignored or defaulted). It needs neither network nor `gh`."""
+(`profiles/profile.schema.json`). It implements the schema's rules plus the few cross-field rules a JSON
+schema cannot express (`SUPPLEMENTAL_RULES`), is total (diagnostics, never a raise, for any YAML value)
+and fails closed (an unknown key or a malformed value is an error, never ignored or defaulted). It
+needs neither network nor `gh`.
+
+`PROC-KIT-P1-R001`: a non-string value in an enum position is a shape error, checked before any
+membership test, so a list or mapping there can never raise. `PROC-KIT-P1-R002`: every supplied value
+is validated whether or not the selected backend uses it, and the schema expresses the role-coverage
+rules as constraints; `tests/test_profile.py` runs both validators differentially."""
 
 from __future__ import annotations
 
@@ -22,6 +28,7 @@ ALIAS = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 TOP_REQUIRED = ("kit", "project", "authority", "repos", "coordination", "agents", "delegation")
 TOP_OPTIONAL = (
+    "conformance",
     "taxonomy_aliases",
     "hazard_families",
     "gates",
@@ -42,6 +49,13 @@ TAXONOMY = frozenset(
 )
 TIERS = frozenset({"g0", "g1", "g2", "g3"})
 WP_KINDS = frozenset({"semantic", "delta", "process", "scoping", "status"})
+
+SUPPLEMENTAL_RULES = (
+    "implementation_order: every language listed has an `implementer:<language>` agent",
+    "conformance: `support` entries are not also `families` entries",
+)
+"""Cross-field rules the JSON schema cannot express. Each is named in the schema's `description` so a
+reader of either artifact knows the full rule set; `tests/test_profile.py` checks that agreement."""
 
 
 class _Check:
@@ -83,6 +97,16 @@ class _Check:
             return False
         return True
 
+    def enum(self, value: Any, path: str, allowed: frozenset[str]) -> bool:
+        """Shape first (R001): only a string is ever tested for membership."""
+        if not isinstance(value, str):
+            self.error(path, f"must be a string, got {type(value).__name__}")
+            return False
+        if value not in allowed:
+            self.error(path, f"must be one of {sorted(allowed)}, got {value!r}")
+            return False
+        return True
+
     def string_list(self, value: Any, path: str, minimum: int = 0) -> list[str] | None:
         if not isinstance(value, list):
             self.error(path, f"must be a list, got {type(value).__name__}")
@@ -97,6 +121,10 @@ class _Check:
         if len(set(items)) != len(items):
             self.error(path, "items must be unique")
         return items
+
+    def enum_list(self, value: Any, path: str, allowed: frozenset[str], minimum: int = 0) -> list[str]:
+        items = self.string_list(value, path, minimum) or []
+        return [item for i, item in enumerate(items) if self.enum(item, f"{path}[{i}]", allowed)]
 
 
 def _kit(c: _Check, value: Any) -> None:
@@ -119,8 +147,7 @@ def _authority(c: _Check, value: Any) -> None:
         entry = c.mapping(raw, path)
         if entry is None or not c.keys(entry, path, ("kind",), ("name", "path", "pin", "verify")):
             continue
-        if entry["kind"] not in AUTHORITY_KINDS:
-            c.error(f"{path}.kind", f"must be one of {sorted(AUTHORITY_KINDS)}, got {entry['kind']!r}")
+        c.enum(entry["kind"], f"{path}.kind", AUTHORITY_KINDS)
         if "path" not in entry and "pin" not in entry:
             c.error(path, "needs `path` or `pin`")
         for key in ("name", "path", "pin", "verify"):
@@ -150,19 +177,27 @@ def _coordination(c: _Check, value: Any) -> None:
     coord = c.mapping(value, "coordination")
     if coord is None or not c.keys(coord, "coordination", ("backend",), ("repo", "path")):
         return
-    backend = coord["backend"]
-    if backend not in BACKENDS:
-        c.error("coordination.backend", f"must be one of {sorted(BACKENDS)}, got {backend!r}")
-        return
-    if backend == "github-issue":
-        if "repo" not in coord:
-            c.error("coordination.repo", "required for the github-issue backend")
-        else:
-            c.text(coord["repo"], "coordination.repo", REPO, "owner/repo")
-    elif "path" not in coord:
-        c.error("coordination.path", "required for the state-file backend")
-    else:
+    # R002: every supplied locator is validated, whichever backend is selected.
+    if "repo" in coord:
+        c.text(coord["repo"], "coordination.repo", REPO, "owner/repo")
+    if "path" in coord:
         c.text(coord["path"], "coordination.path")
+    if not c.enum(coord["backend"], "coordination.backend", BACKENDS):
+        return
+    needed = "repo" if coord["backend"] == "github-issue" else "path"
+    if needed not in coord:
+        c.error(f"coordination.{needed}", f"required for the {coord['backend']} backend")
+
+
+def _conformance(c: _Check, value: Any) -> None:
+    conf = c.mapping(value, "conformance")
+    if conf is None or not c.keys(conf, "conformance", ("families",), ("support",)):
+        return
+    families = c.string_list(conf["families"], "conformance.families", minimum=1) or []
+    support = c.string_list(conf["support"], "conformance.support") if "support" in conf else []
+    for i, item in enumerate(support or []):
+        if item in families:
+            c.error(f"conformance.support[{i}]", f"{item!r} is also a behavior family; it cannot be both")
 
 
 def _agents(c: _Check, value: Any) -> set[str]:
@@ -216,8 +251,7 @@ def _aliases(c: _Check, value: Any) -> None:
     for alias, target in aliases.items():
         if ALIAS.match(alias) is None:
             c.error(f"taxonomy_aliases.{alias}", "alias must be an UPPER_CASE identifier")
-        if target not in TAXONOMY:
-            c.error(f"taxonomy_aliases.{alias}", f"must map to one of {sorted(TAXONOMY)}, got {target!r}")
+        c.enum(target, f"taxonomy_aliases.{alias}", TAXONOMY)
 
 
 def _gates(c: _Check, value: Any) -> None:
@@ -230,10 +264,7 @@ def _gates(c: _Check, value: Any) -> None:
         if gate is None or not c.keys(gate, path, ("launcher", "tiers"), ()):
             continue
         c.text(gate["launcher"], f"{path}.launcher")
-        tiers = c.string_list(gate["tiers"], f"{path}.tiers", minimum=1)
-        for i, tier in enumerate(tiers or []):
-            if tier not in TIERS:
-                c.error(f"{path}.tiers[{i}]", f"must be one of {sorted(TIERS)}, got {tier!r}")
+        c.enum_list(gate["tiers"], f"{path}.tiers", TIERS, minimum=1)
 
 
 def _delegation(c: _Check, value: Any) -> None:
@@ -245,14 +276,9 @@ def _delegation(c: _Check, value: Any) -> None:
         c.error("delegation.routing", "must be true or false")
 
 
-def _enum_list(c: _Check, value: Any, path: str, allowed: frozenset[str]) -> None:
-    for i, item in enumerate(c.string_list(value, path) or []):
-        if item not in allowed:
-            c.error(f"{path}[{i}]", f"must be one of {sorted(allowed)}, got {item!r}")
-
-
 def validate_profile(data: Any) -> list[Problem]:
-    """Every rule of `profiles/profile.schema.json`, as diagnostics. Never raises."""
+    """Every rule of `profiles/profile.schema.json` plus `SUPPLEMENTAL_RULES`, as diagnostics. Never
+    raises."""
     c = _Check()
     profile = c.mapping(data, "profile")
     if profile is None:
@@ -268,6 +294,8 @@ def validate_profile(data: Any) -> list[Problem]:
         _repos(c, profile["repos"])
     if "coordination" in profile:
         _coordination(c, profile["coordination"])
+    if "conformance" in profile:
+        _conformance(c, profile["conformance"])
     languages = _agents(c, profile["agents"]) if "agents" in profile else set()
     if "taxonomy_aliases" in profile:
         _aliases(c, profile["taxonomy_aliases"])
@@ -278,7 +306,7 @@ def validate_profile(data: Any) -> list[Problem]:
     if "delegation" in profile:
         _delegation(c, profile["delegation"])
     if "wp_kinds_enabled" in profile:
-        _enum_list(c, profile["wp_kinds_enabled"], "wp_kinds_enabled", WP_KINDS)
+        c.enum_list(profile["wp_kinds_enabled"], "wp_kinds_enabled", WP_KINDS)
     if "implementation_order" in profile:
         order = c.string_list(profile["implementation_order"], "implementation_order", minimum=1) or []
         for i, language in enumerate(order):

@@ -16,6 +16,10 @@ repos:
 
 coordination: {backend: github-issue, repo: ORG/example}    # or {backend: state-file, path: process/state/}
 
+conformance:                              # WORKFLOW.md section 9: behavior families vs support infrastructure
+  families: [runtime, session]
+  support: [schema]
+
 agents:                                   # panes are defaults only; reply-to is recorded per dispatch
   claude: {roles: [coordinator, shared-contract-owner, implementer:python], harness: claude-code, default_pane: "w1:p1"}
   codex:  {roles: [reviewer, implementer:rust], harness: codex, default_pane: "w1:p2"}

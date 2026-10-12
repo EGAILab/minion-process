@@ -1,5 +1,6 @@
-# Minion-Agent profile (first consumer). The live copy is minion-agent-docs/process/profile.yaml;
-# this file is the kit's reference copy and is validated in the kit's CI.
+# Minion-Agent profile (first consumer): the kit's reference copy, validated in the kit's CI.
+# Intended live location on future adoption: minion-agent-docs/process/profile.yaml (no such file exists
+# until Minion-Agent's own reviewed adoption PR; this file does not imply present adoption).
 kit: {version: "0.1.0", source: EGAILab/minion-process}
 project: minion-agent
 
@@ -16,6 +17,10 @@ repos:
   docs: {path: ., default_branch: master, github: EGAILab/minion-agent-docs}
 
 coordination: {backend: github-issue, repo: EGAILab/minion-agent}   # Owner decision 5 (2026-10-11): stay on GitHub issues
+
+conformance:                              # agent-workflow.md section 9 at dd9fd15 (seed-history/minion-agent-specifics.md):
+  families: [runtime, session, agent]     # "There are exactly three canonical behavior families"
+  support: [schema]                       # "`conformance/schema` is support infrastructure, not a fourth behavior family"
 
 agents:
   claude: {roles: [coordinator, shared-contract-owner, implementer:python], harness: claude-code, default_pane: "w1:p1"}
