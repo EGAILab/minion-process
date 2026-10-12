@@ -57,6 +57,20 @@ class FakeGitHub:
         self.merges: list[tuple[str, int, str]] = []
         self.revisions: dict[tuple[str, int], list[tuple[str, str]]] = {}
         self.history_fails = False
+        self.issue_comments: dict[tuple[str, int], list[str]] = {}
+        self.closed: list[tuple[str, int, str]] = []
+
+    def published(self, repo: str, number: int, index: int, entry: Any) -> dict[str, Any]:
+        """A stored comment as the API returns it. A plain string gets a deterministic id and timestamp
+        (increasing with position, distinct per issue); a mapping supplies its own `id`/`created_at`."""
+        if isinstance(entry, dict):  # exactly the keys given: a missing id/created_at stays missing
+            return dict(entry)
+        cid = number * 1000 + index + 1
+        return {
+            "id": cid,
+            "created_at": f"2026-10-12T{(cid // 3600) % 24:02d}:{(cid // 60) % 60:02d}:{cid % 60:02d}Z",
+            "body": entry,
+        }
 
     def run(self, args: list[str], stdin: str | None) -> str:
         from minion_process.github import GitHubError
@@ -86,7 +100,21 @@ class FakeGitHub:
         if head in ("issue", "pr") and args[1] == "comment":
             cid = str(len(self.comments) + 1)
             self.comments[cid] = stdin or ""
+            self.issue_comments.setdefault((args[4], int(args[2])), []).append(stdin or "")
             return f"https://github.com/{args[4]}/issues/{args[2]}#issuecomment-{cid}\n"
+        if head == "issue" and args[1] == "close":
+            self.closed.append((args[4], int(args[2]), args[-1]))
+            self.issues[(args[4], int(args[2]))]["state"] = "CLOSED"
+            return ""
+        if head == "api" and args[1] == "--paginate":
+            path = args[3]
+            repo = path.removeprefix("repos/").split("/issues/")[0]
+            number = int(path.split("/issues/")[1].split("/")[0])
+            page = [
+                self.published(repo, number, i, entry)
+                for i, entry in enumerate(self.issue_comments.get((repo, number), []))
+            ]
+            return json.dumps([page]) if page else ""
         if head == "api" and args[1] == "graphql":
             if self.history_fails:
                 raise GitHubError("graphql unavailable")

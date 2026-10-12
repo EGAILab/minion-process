@@ -2,6 +2,56 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
+## 0.3.0 — P3a: structured review header, convergence counters, metrics, composite verbs (2026-10-12)
+
+Record §6.6; coordination `minion-agent#213` (PROC-KIT-P3, process / governing CP-6).
+
+- `templates/review-record.md`: the fenced `review:` header (schema version 1) every review record now
+  opens with; `minion-process review-check <file>` validates it offline (`minion_process/review.py`):
+  reviewer ≠ author, no blocking finding under `APPROVED`, no findings under `HANDOFF_BLOCKED`, a
+  negative control or `NOT_APPLICABLE` with reason for every closed finding, `surface` for successor
+  counting, `new_evidence` for the no-new-evidence signal; fail-closed shapes.
+- `minion-process convergence counters <issue>`: reads the headers published on the coordination issue
+  and the candidate PRs, computes triggers A (a blocking finding in two or more reviews), B (two
+  distinct blocking findings on one surface) and C (three rejected complete reviews) plus the rounds
+  without new evidence, and prints the mandatory §11.8 statement. Invalid headers are counted, never
+  silently dropped.
+- `minion-process metrics <issue> [--out file]`: the §14.6 metrics available from the state block and
+  the headers (review events, complete vs targeted, approvals, rounds without new evidence, findings by
+  class, closures with and without negative control, gate tiers verified, routes taken, Owner questions
+  routed, triggers).
+- Composite verbs (`minion_process/composite.py`): `handoff <issue> --to --action [--status] [--sha
+  side=sha]` sets owner, action and heads in one checked commit and refuses with zero writes when the
+  intended candidate would be `HANDOFF_BLOCKED`; `close <issue> --comment-file` verifies every
+  recorded candidate PR is merged at its recorded head, records the merge commits, moves to `CLOSED`
+  through every closure guard, then closes the issue. Both are built only from the existing primitives.
+- `GitHub.issue_comments` (paginated) and `GitHub.close_issue`.
+- Review 1 (`PROC-KIT-P3-R001`–`R003`): identical headers published on the issue and the candidate PRs
+  are one review event (transport copies are counted and ignored, never counted as reviews);
+  `handoff` checks the issue is OPEN and the target status permits a hand-off before any write; every
+  fenced YAML block whose first key is `review` is a review header however its value is written, unknown
+  keys of any YAML type are diagnostics, and a boolean `schema_version` is rejected.
+- Convergence episode `CE-PROC-P3A-01` (`R001`/`R003` refined twice; checkpoint agreed on revision 4):
+  header `schema_version: 2` with required `round`; review-event identity `(wp, reviewer, round)`,
+  mirrors by parsed-value equality, conflicts reported and excluded; chronology from the remote's
+  comment metadata with the total key `(created_at, round, comment id, fence ordinal)` and multi-header
+  comments reported; discovery of review claims by the YAML scanner's token prefix up to the first key
+  scalar, with one disposition per claim in priority `unsupported publication form` (root or key
+  properties, explicit key) > `unparsable` > `invalid shape` > valid; the statement and the metrics show
+  every excluded header. `GitHub.issue_comments` returns `{id, created_at, body}`.
+  Targeted closure 1 (`R001`/`R003` refined, `R004`): conflicts name the differing fields; any loader
+  failure of a recognized claim is `unparsable` and collection continues; a comment whose publication
+  metadata the remote does not return is reported as unorderable and makes the statement and metrics
+  INCOMPLETE, never a negative result.
+  Agreed checkpoint revision 7 (`R003`): the publication domain is the CommonMark parser's block
+  structure (`markdown-it-py`, `commonmark` preset, no plugins): a top-level fenced code block whose raw
+  info string starts with `yaml`/`yml`; quotations, list items, HTML blocks, outer code blocks, indented
+  code and inline code are not publications; content is handed to YAML exactly as the parser yields it
+  (the transport replaces U+0000 by U+FFFD). The parser's nesting cutoff is made unreachable so no input
+  is silently truncated; a parser failure (including the interpreter's recursion limit) makes the whole
+  comment `unread`, reported by id, and the statement and metrics INCOMPLETE.
+- Not yet: `dispatch`, `session start`, `cleanup`, launchers, fault-fired rule, replay suite (0.4.0).
+
 ## 0.2.0 — P2: kinds, consequence classes, routing (2026-10-12)
 
 Owner decisions 2 and 3 (`minion-agent#205`); `minion-agent#75` Amendment 2 (Owner, 2026-10-12).
