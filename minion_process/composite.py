@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 from .github import REPOS, GitHub, GitHubError
-from .model import candidates
+from .model import NON_ACTIONABLE, candidates
 from .ops import REVIEW_OR_HANDOFF_STATES, CheckFailed, Report, candidate_report, commit_state, handoff_report
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -49,10 +49,21 @@ def handoff(
             raise CheckFailed(f"unknown candidate side {side!r} (allowed: {', '.join(REPOS)})")
         if not SHA.match(sha):
             raise CheckFailed(f"{side} SHA is not a full 40-hex SHA: {sha!r}")
+    # pre-write (R002): every knowable §11.11 prerequisite is checked before any write
+    issue = gh.issue(repo, number)
+    if issue.get("state") != "OPEN":
+        raise CheckFailed(
+            f"HANDOFF_BLOCKED (pre-write): coordination issue is {issue.get('state')!r}, not OPEN"
+        )
 
     def mutate(w: dict[str, Any]) -> None:
         if status is not None:
             w["status"] = status
+        target = w.get("status")
+        if target in NON_ACTIONABLE or target == "BLOCKED_FOR_OWNER":
+            raise CheckFailed(
+                f"HANDOFF_BLOCKED (pre-write): status {target} does not permit a hand-off (§11.11)"
+            )
         w["next_owner"] = to
         w["next_action"] = action
         w["updated_reason"] = f"handoff to {to}"

@@ -26,6 +26,11 @@ Record §6.6; coordination `minion-agent#213` (PROC-KIT-P3, process / governing 
   recorded candidate PR is merged at its recorded head, records the merge commits, moves to `CLOSED`
   through every closure guard, then closes the issue. Both are built only from the existing primitives.
 - `GitHub.issue_comments` (paginated) and `GitHub.close_issue`.
+- Review 1 (`PROC-KIT-P3-R001`–`R003`): identical headers published on the issue and the candidate PRs
+  are one review event (transport copies are counted and ignored, never counted as reviews);
+  `handoff` checks the issue is OPEN and the target status permits a hand-off before any write; every
+  fenced YAML block whose first key is `review` is a review header however its value is written, unknown
+  keys of any YAML type are diagnostics, and a boolean `schema_version` is rejected.
 - Not yet: `dispatch`, `session start`, `cleanup`, launchers, fault-fired rule, replay suite (0.4.0).
 
 ## 0.2.0 — P2: kinds, consequence classes, routing (2026-10-12)

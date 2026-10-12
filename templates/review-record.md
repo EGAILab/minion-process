@@ -30,6 +30,9 @@ review:
 ```
 ````
 
+Publishing the same record verbatim on the coordination issue and on each candidate PR is normal
+transport: identical headers are one review event and the tool counts them once.
+
 Rules the tool enforces: `reviewer` differs from `author`; `APPROVED` carries no blocking finding;
 `HANDOFF_BLOCKED` carries no findings; every closed finding records its negative control, or
 `NOT_APPLICABLE` with the reason; `surface` names the root-cause surface so successor findings (trigger

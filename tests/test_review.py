@@ -204,8 +204,8 @@ def finding(fid: str, surface: str | None = None, blocking: bool = True) -> dict
 
 def test_select_reviews_filters_by_wp_and_counts_invalid_headers() -> None:
     records = [good(), good(wp="WP-OTHER"), {"review": 1}, "<unparsable>"]
-    reviews, invalid = select_reviews(records, "WP-X")
-    assert len(reviews) == 1 and invalid == 2
+    reviews, invalid, duplicates = select_reviews(records, "WP-X")
+    assert len(reviews) == 1 and invalid == 2 and duplicates == 0
 
 
 def test_counters_and_triggers() -> None:
@@ -237,7 +237,7 @@ def test_no_trigger_statement_and_c_trigger() -> None:
     assert "Trigger A has not fired" in text and "(max 1)" in text and "No trigger fired" in text
     three = counters([review(findings=[finding(f"WPX-R00{i}")]) for i in range(3)])
     assert three.c_fired and "Trigger C HAS FIRED: 3" in trigger_statement(three)
-    assert trigger_statement(counters([])).startswith("0 review record(s) read")
+    assert trigger_statement(counters([])).startswith("0 distinct review event(s) read")
 
 
 def test_metrics_from_state_and_reviews() -> None:

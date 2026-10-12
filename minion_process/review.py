@@ -10,6 +10,7 @@ errors). Presence is decided by the key, never by truthiness."""
 
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -34,7 +35,10 @@ TIERS = ("G0", "G1", "G2", "G3", "none")
 CLASS_OUTCOMES = ("CONFIRMED", "CORRECTED")
 ALIAS = re.compile(r"^[A-Z][A-Z0-9_]*$")
 NOT_APPLICABLE = "NOT_APPLICABLE"
-FENCE = re.compile(r"```ya?ml[ \t]*\r?\n(review:\r?\n.*?)\r?\n```", re.DOTALL)
+FENCE = re.compile(r"```ya?ml[ \t]*\r?\n(.*?)\r?\n```", re.DOTALL)
+"""Every fenced YAML block; `REVIEW_BLOCK` then decides which ones claim to be review headers."""
+REVIEW_BLOCK = re.compile(r"\A\s*review\s*:")
+"""A block whose first key is `review`, however its value is written (nested, inline, null)."""
 
 TOP_REQUIRED = (
     "schema_version",
@@ -66,11 +70,19 @@ def parse_review_records(text: str) -> list[Any]:
     reported, never silently dropped."""
     found: list[Any] = []
     for match in FENCE.finditer(text):
+        block = match.group(1)
+        if not REVIEW_BLOCK.match(block):
+            continue  # an ordinary YAML block (a state block, an example): not a review header
         try:
-            found.append(yaml.safe_load(match.group(1)))
+            found.append(yaml.safe_load(block))
         except Exception:  # totality: a bad block is a diagnostic, never a traceback
             found.append("<unparsable>")
     return found
+
+
+def _unknown(keys: Any, allowed: set[str]) -> list[str]:
+    """Unknown keys as sorted strings; any YAML key type is tolerated (R003)."""
+    return sorted(str(k) for k in keys if k not in allowed)
 
 
 def validate_review(record: Any) -> list[Problem]:
@@ -86,10 +98,11 @@ def validate_review(record: Any) -> list[Problem]:
     for key in TOP_REQUIRED:
         if key not in r:
             c.error(f"review.{key}", "required")
-    extra = sorted(set(r) - set(TOP_REQUIRED) - set(TOP_OPTIONAL))
+    extra = _unknown(r, set(TOP_REQUIRED) | set(TOP_OPTIONAL))
     if extra:
         c.error("review", f"unknown keys {extra}")
-    if "schema_version" in r and r["schema_version"] != 1:
+    version = r.get("schema_version")
+    if "schema_version" in r and (not isinstance(version, int) or isinstance(version, bool) or version != 1):
         c.error(
             "review.schema_version",
             f"unsupported review schema_version {r['schema_version']!r} (supported: 1)",
@@ -162,7 +175,7 @@ def _class_confirmation(c: _Check, cc: Any) -> None:
             "review.class_confirmation.outcome",
             f"must be one of {', '.join(CLASS_OUTCOMES)}, got {cc.get('outcome')!r}",
         )
-    extra = sorted(set(cc) - {"kind", "class", "rule", "outcome"})
+    extra = _unknown(cc, {"kind", "class", "rule", "outcome"})
     if extra:
         c.error("review.class_confirmation", f"unknown keys {extra}")
 
@@ -195,7 +208,7 @@ def _findings(c: _Check, findings: Any) -> int:
         for key in ("surface", "witness"):
             if key in f and not _text(f[key]):
                 c.error(f"{path}.{key}", "must be a non-empty string when present")
-        extra = sorted(set(f) - {"id", "class", "blocking", "surface", "witness"})
+        extra = _unknown(f, {"id", "class", "blocking", "surface", "witness"})
         if extra:
             c.error(path, f"unknown keys {extra}")
     return blocking
@@ -220,7 +233,7 @@ def _closed(c: _Check, closed: Any) -> None:
             )
         elif control.strip() == NOT_APPLICABLE and not _text(entry.get("reason")):
             c.error(f"{path}.reason", "NOT_APPLICABLE requires the reason (documentary/traceability-only)")
-        extra = sorted(set(entry) - {"id", "negative_control", "reason"})
+        extra = _unknown(entry, {"id", "negative_control", "reason"})
         if extra:
             c.error(path, f"unknown keys {extra}")
 
@@ -239,6 +252,7 @@ class Counters:
     rounds_without_new_evidence: int = 0
     consecutive_without_new_evidence: int = 0
     invalid: int = 0
+    duplicates: int = 0
 
     @property
     def a_fired(self) -> list[str]:
@@ -253,22 +267,32 @@ class Counters:
         return self.rejected_complete >= 3
 
 
-def select_reviews(records: list[Any], wp: str) -> tuple[list[dict[str, Any]], int]:
-    """The valid review headers for `wp`, in the order given, and the number of invalid headers seen."""
+def select_reviews(records: list[Any], wp: str) -> tuple[list[dict[str, Any]], int, int]:
+    """The valid, distinct review headers for `wp`, in the order given; the number of invalid headers
+    seen; and the number of transport copies ignored. One review event is routinely published verbatim
+    on the coordination issue and on each candidate PR: identical headers are one event, counted once
+    (`PROC-KIT-P3-R001`). Two headers differ in any field are two events."""
     valid: list[dict[str, Any]] = []
-    invalid = 0
+    seen: set[str] = set()
+    invalid = duplicates = 0
     for record in records:
         if validate_review(record):
             invalid += 1
             continue
         review = record["review"]
-        if review["wp"] == wp:
-            valid.append(review)
-    return valid, invalid
+        if review["wp"] != wp:
+            continue
+        key = json.dumps(review, sort_keys=True, default=str)
+        if key in seen:
+            duplicates += 1
+            continue
+        seen.add(key)
+        valid.append(review)
+    return valid, invalid, duplicates
 
 
-def counters(reviews: list[dict[str, Any]], invalid: int = 0) -> Counters:
-    k = Counters(reviews=len(reviews), invalid=invalid)
+def counters(reviews: list[dict[str, Any]], invalid: int = 0, duplicates: int = 0) -> Counters:
+    k = Counters(reviews=len(reviews), invalid=invalid, duplicates=duplicates)
     streak = 0
     for r in reviews:
         if r["verdict"] == "HANDOFF_BLOCKED":
@@ -294,7 +318,8 @@ def counters(reviews: list[dict[str, Any]], invalid: int = 0) -> Counters:
 def trigger_statement(k: Counters) -> str:
     """The mandatory §11.8 trigger statement, from recorded evidence only."""
     ignored = f"; {k.invalid} invalid header(s) ignored" if k.invalid else ""
-    lines = [f"{k.reviews} review record(s) read{ignored}"]
+    copies = f"; {k.duplicates} transport cop{'y' if k.duplicates == 1 else 'ies'} of the same event ignored"
+    lines = [f"{k.reviews} distinct review event(s) read{ignored}{copies if k.duplicates else ''}"]
     if k.a_fired:
         lines.append(f"Trigger A HAS FIRED: {', '.join(k.a_fired)} survived two or more independent reviews.")
     else:
@@ -323,9 +348,11 @@ def trigger_statement(k: Counters) -> str:
     return "\n".join(lines)
 
 
-def metrics(workflow: dict[str, Any], reviews: list[dict[str, Any]], invalid: int = 0) -> dict[str, Any]:
+def metrics(
+    workflow: dict[str, Any], reviews: list[dict[str, Any]], invalid: int = 0, duplicates: int = 0
+) -> dict[str, Any]:
     """The §14.6 metrics available from the state block and the recorded reviews."""
-    k = counters(reviews, invalid)
+    k = counters(reviews, invalid, duplicates)
     by_class: Counter[str] = Counter()
     by_tier: Counter[str] = Counter()
     closed_nc = closed_na = 0
@@ -366,6 +393,7 @@ def metrics(workflow: dict[str, Any], reviews: list[dict[str, Any]], invalid: in
         "owner_questions_routed": sum(1 for r in route_ids if r in ("RT-4", "RT-6")),
         "triggers": {"A": k.a_fired, "B": k.b_fired, "C": k.c_fired},
         "invalid_review_headers": invalid,
+        "transport_copies_ignored": duplicates,
     }
 
 

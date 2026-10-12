@@ -58,8 +58,11 @@ def _repo(name: str) -> str:
     return REPOS.get(name, name)
 
 
-def _collect_reviews(gh: GitHub, repo: str, number: int) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
-    """The state block plus every valid review header published on the issue and its candidate PRs."""
+def _collect_reviews(
+    gh: GitHub, repo: str, number: int
+) -> tuple[dict[str, Any], list[dict[str, Any]], int, int]:
+    """The state block plus every distinct valid review header published on the issue and its candidate
+    PRs, with the counts of invalid headers and of transport copies."""
     workflow = split_body(gh.issue(repo, number)["body"]).workflow
     invalid = errors(validate_workflow(workflow))
     if invalid:
@@ -71,8 +74,8 @@ def _collect_reviews(gh: GitHub, repo: str, number: int) -> tuple[dict[str, Any]
     records: list[Any] = []
     for body in bodies:
         records += parse_review_records(body)
-    reviews, bad = select_reviews(records, str(workflow["work_package"]))
-    return workflow, reviews, bad
+    reviews, bad, copies = select_reviews(records, str(workflow["work_package"]))
+    return workflow, reviews, bad, copies
 
 
 def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
@@ -237,12 +240,12 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
             print(verdict if report.failed else "OK")
             return 1 if report.failed else 0
         if args.command == "convergence":
-            _, reviews, bad = _collect_reviews(gh, args.repo, args.issue)
-            print(trigger_statement(counters(reviews, bad)))
+            _, reviews, bad, copies = _collect_reviews(gh, args.repo, args.issue)
+            print(trigger_statement(counters(reviews, bad, copies)))
             return 0
         if args.command == "metrics":
-            workflow, reviews, bad = _collect_reviews(gh, args.repo, args.issue)
-            text = yaml.safe_dump(metrics(workflow, reviews, bad), sort_keys=False)
+            workflow, reviews, bad, copies = _collect_reviews(gh, args.repo, args.issue)
+            text = yaml.safe_dump(metrics(workflow, reviews, bad, copies), sort_keys=False)
             if args.out:
                 Path(args.out).write_text(text, encoding="utf-8")
                 print(f"metrics written to {args.out}")
