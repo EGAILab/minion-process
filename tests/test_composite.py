@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from minion_process.cli import main
 from minion_process.composite import close, handoff
@@ -16,7 +15,6 @@ from minion_process.model import render_body, split_body
 from minion_process.ops import CheckFailed
 
 from .test_minion_process import CODE, DOCS, SHA_A, SHA_B, FakeGitHub, workflow
-from .test_review import GOOD, good, render
 
 
 def run(fake: FakeGitHub, *argv: str) -> int:
@@ -231,34 +229,3 @@ def test_close_runs_the_closure_guards_and_the_cli(
     assert run(fake, "close", "10", "--comment-file", str(note)) == 0
     out = capsys.readouterr().out
     assert "CLOSED #10" in out and "code merged" in out and fake.closed[0][2] == "PROC CLOSED\n"
-
-
-# --- counters and metrics over the remote --------------------------------------------------------------
-
-
-def test_convergence_counters_and_metrics_cli(
-    fake: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    header = render(GOOD)  # WP-X, one blocking finding, CHANGES_REQUESTED
-    second = render(good(type="TARGETED_CLOSURE", complete=False))  # a distinct second review event
-    fake.issue_comments[(CODE, 10)] = ["plain comment", header]
-    fake.issue_comments[(CODE, 1)] = [header, second]  # the mirror counts once; the second event counts
-    fake.issue_comments[(DOCS, 2)] = ["```yaml\nreview:\n  - broken\n```"]
-    assert run(fake, "convergence", "counters", "10") == 0
-    out = capsys.readouterr().out
-    assert "Trigger A HAS FIRED: WPX-R001" in out and "1 invalid header(s) ignored" in out
-    assert "1 transport copy of the same event ignored" in out
-    target = tmp_path / "m.yaml"
-    assert run(fake, "metrics", "10", "--out", str(target)) == 0
-    assert "metrics written to" in capsys.readouterr().out
-    m = yaml.safe_load(target.read_text(encoding="utf-8"))
-    assert m["review_events"] == 2 and m["triggers"]["A"] == ["WPX-R001"] and m["invalid_review_headers"] == 1
-    assert m["transport_copies_ignored"] == 1
-    assert run(fake, "metrics", "10") == 0
-    assert "review_events: 2" in capsys.readouterr().out
-    fake.issue_comments.clear()
-    assert run(fake, "convergence", "counters", "10") == 0
-    assert "0 distinct review event(s) read" in capsys.readouterr().out
-    fake.issues[(CODE, 10)]["body"] = render_body({"workflow": workflow(status="BLOCKED")}, "p\n")
-    assert run(fake, "metrics", "10") == 1
-    assert "current state invalid" in capsys.readouterr().err

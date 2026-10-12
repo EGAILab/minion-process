@@ -580,7 +580,10 @@ review record attached to the coordination record or PR suffices if it contains 
 candidate SHA(s), authority revision, scope, findings, witness links, verdict and next transition
 (`templates/review-record.md`). The record opens with the structured `review:` header the tool reads
 (`minion-process review-check`); the published headers are what `convergence counters` and `metrics`
-compute from, so a verdict that is not published with its header is invisible to them. At
+compute from, so a verdict that is not published with its header is invisible to them. One review
+event is `(wp, reviewer, round)`: copies of one verdict published on the issue and the candidate PRs are
+transport and count once; a separately issued verdict is a new round; copies with one identity but
+different values are a conflict the tool reports and excludes rather than resolves. At
 certification, summarize material intermediate evidence into the final assurance record. Do not reduce
 evidence quality; reduce redundant repository objects.
 
@@ -689,8 +692,10 @@ reopen certified semantics or change the taxonomy.
 remediation owner explicitly checks A, B and C against the finding's own review history, root-cause
 surface and the WP's rejected-review count, and states the result ("R003 has survived one independent
 review, so A has not fired; …"). `minion-process convergence counters <issue>` computes the three
-counters from the published review headers and prints this statement; the owner records it and adds
-what the headers cannot know. Being at two surviving reviews is A fired, not "approaching". If a
+counters from the distinct review events in the published headers, ordered by the publication time of
+each event's earliest copy, and prints this statement with everything it excluded (conflicts, invalid
+headers) made visible; the owner records it and adds what the headers cannot know. An excluded header is
+never a negative result. Being at two surviving reviews is A fired, not "approaching". If a
 trigger is met, convergence is the default; another point-fix pass requires stating why. Do not weaken
 the thresholds (`lessons/L08-TRIGGER-CHECK.md`). Where routing is delegated (`routing.md` RT-6), a fired
 trigger is recorded with its counters and **notified to the Owner with the default route**; the

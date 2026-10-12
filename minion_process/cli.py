@@ -43,6 +43,8 @@ from .ops import (
 )
 from .profile import load_profile
 from .review import (
+    Copy,
+    Selection,
     counters,
     metrics,
     parse_review_records,
@@ -58,24 +60,24 @@ def _repo(name: str) -> str:
     return REPOS.get(name, name)
 
 
-def _collect_reviews(
-    gh: GitHub, repo: str, number: int
-) -> tuple[dict[str, Any], list[dict[str, Any]], int, int]:
-    """The state block plus every distinct valid review header published on the issue and its candidate
-    PRs, with the counts of invalid headers and of transport copies."""
+def _collect_reviews(gh: GitHub, repo: str, number: int) -> tuple[dict[str, Any], Selection]:
+    """The state block plus the review events published on the issue and its candidate PRs
+    (`CE-PROC-P3A-01`): every comment's claims become copies carrying the remote's publication metadata;
+    `select_reviews` groups them into distinct events, mirrors, conflicts and invalid headers."""
     workflow = split_body(gh.issue(repo, number)["body"]).workflow
     invalid = errors(validate_workflow(workflow))
     if invalid:
         raise CheckFailed("current state invalid: " + "; ".join(map(str, invalid)))
-    bodies = list(gh.issue_comments(repo, number))
+    comments = list(gh.issue_comments(repo, number))
     for side, entry in candidates(workflow).items():
         if isinstance(entry, dict) and entry.get("pr"):
-            bodies += gh.issue_comments(REPOS[side], int(entry["pr"]))
-    records: list[Any] = []
-    for body in bodies:
-        records += parse_review_records(body)
-    reviews, bad, copies = select_reviews(records, str(workflow["work_package"]))
-    return workflow, reviews, bad, copies
+            comments += gh.issue_comments(REPOS[side], int(entry["pr"]))
+    copies = [
+        Copy(comment["created_at"], comment["id"], claim)
+        for comment in comments
+        for claim in parse_review_records(comment["body"])
+    ]
+    return workflow, select_reviews(copies, str(workflow["work_package"]))
 
 
 def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
@@ -138,12 +140,16 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
         print("INVALID" if errors(problems) else "VALID")
         return 1 if errors(problems) else 0
     if args.command == "review-check":  # offline
-        records = parse_review_records(Path(args.file).read_text(encoding="utf-8"))
-        if len(records) != 1:
-            print(f"ERROR: review: expected exactly one `review:` header, found {len(records)}")
+        claims = parse_review_records(Path(args.file).read_text(encoding="utf-8"))
+        if len(claims) != 1:
+            print(f"ERROR: review: expected exactly one `review:` header, found {len(claims)}")
             print("INVALID")
             return 1
-        problems = validate_review(records[0])
+        if claims[0].reason is not None:
+            print(f"ERROR: review: {claims[0].reason}")
+            print("INVALID")
+            return 1
+        problems = validate_review(claims[0].record)
         for problem in problems:
             print(problem)
         print("INVALID" if errors(problems) else "VALID")
@@ -240,12 +246,12 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
             print(verdict if report.failed else "OK")
             return 1 if report.failed else 0
         if args.command == "convergence":
-            _, reviews, bad, copies = _collect_reviews(gh, args.repo, args.issue)
-            print(trigger_statement(counters(reviews, bad, copies)))
+            _, selection = _collect_reviews(gh, args.repo, args.issue)
+            print(trigger_statement(counters(selection)))
             return 0
         if args.command == "metrics":
-            workflow, reviews, bad, copies = _collect_reviews(gh, args.repo, args.issue)
-            text = yaml.safe_dump(metrics(workflow, reviews, bad, copies), sort_keys=False)
+            workflow, selection = _collect_reviews(gh, args.repo, args.issue)
+            text = yaml.safe_dump(metrics(workflow, selection), sort_keys=False)
             if args.out:
                 Path(args.out).write_text(text, encoding="utf-8")
                 print(f"metrics written to {args.out}")

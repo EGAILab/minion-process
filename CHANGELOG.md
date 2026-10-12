@@ -31,6 +31,14 @@ Record §6.6; coordination `minion-agent#213` (PROC-KIT-P3, process / governing 
   `handoff` checks the issue is OPEN and the target status permits a hand-off before any write; every
   fenced YAML block whose first key is `review` is a review header however its value is written, unknown
   keys of any YAML type are diagnostics, and a boolean `schema_version` is rejected.
+- Convergence episode `CE-PROC-P3A-01` (`R001`/`R003` refined twice; checkpoint agreed on revision 4):
+  header `schema_version: 2` with required `round`; review-event identity `(wp, reviewer, round)`,
+  mirrors by parsed-value equality, conflicts reported and excluded; chronology from the remote's
+  comment metadata with the total key `(created_at, round, comment id, fence ordinal)` and multi-header
+  comments reported; discovery of review claims by the YAML scanner's token prefix up to the first key
+  scalar, with one disposition per claim in priority `unsupported publication form` (root or key
+  properties, explicit key) > `unparsable` > `invalid shape` > valid; the statement and the metrics show
+  every excluded header. `GitHub.issue_comments` returns `{id, created_at, body}`.
 - Not yet: `dispatch`, `session start`, `cleanup`, launchers, fault-fired rule, replay suite (0.4.0).
 
 ## 0.2.0 — P2: kinds, consequence classes, routing (2026-10-12)

@@ -1,12 +1,25 @@
 """Structured review records (`templates/review-record.md`, record §6.6; kit 0.3.0).
 
-A review record carries one fenced YAML block whose top-level key is `review:`; the prose stays below
-it. The tool reads these headers from the published verdicts (comments on the coordination issue and
-on the candidate PRs) to compute the §11.8 convergence counters and the §14.6 metrics. It never writes
-a verdict and never decides semantics: the labels are the recorded verdicts and negative controls.
+A review record carries one fenced YAML block whose top-level key is `review`; the prose stays below it.
+The tool reads these headers from the published verdicts (comments on the coordination issue and on the
+candidate PRs) to compute the §11.8 convergence counters and the §14.6 metrics. It never writes a
+verdict and never decides semantics: the labels are the recorded verdicts and negative controls.
 
-Validation is total (diagnostics, never a raise) and fails closed (unknown keys and malformed values are
-errors). Presence is decided by the key, never by truthiness."""
+The rules implemented here are the agreed convergence contract `CE-PROC-P3A-01` (`minion-agent#213`):
+
+- **Identity (R1-R4).** One review event is `(wp, reviewer, round)`; `round` is the reviewer's own
+  count of its separately issued review events on the WP. Copies of one event whose parsed values are
+  equal are mirrors (one event); copies whose values differ are a conflict, reported and excluded, never
+  resolved by choosing.
+- **Chronology (R5-R6).** Events are ordered by the publication time of their earliest copy; the total
+  copy key is `(created_at, round, comment id, fence ordinal)`.
+- **Discovery (R7-R10).** A fenced YAML block is a review claim when the YAML scanner's token prefix up to
+  the first key scalar is `[Directive]* [DocumentStart]? [Anchor|Tag]* MappingStart Key [Anchor|Tag]*
+  Scalar("review")`. One reason per claim, in priority: `unsupported publication form` (any property or
+  an explicit key), `unparsable`, `invalid shape`, else valid. Nothing after the first key is consulted.
+
+Validation is total (diagnostics, never a raise) and fails closed (unknown keys and malformed values
+are errors). Presence is decided by the key, never by truthiness."""
 
 from __future__ import annotations
 
@@ -17,10 +30,22 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import yaml
+from yaml.tokens import (
+    AnchorToken,
+    BlockMappingStartToken,
+    DirectiveToken,
+    DocumentStartToken,
+    FlowMappingStartToken,
+    KeyToken,
+    ScalarToken,
+    StreamStartToken,
+    TagToken,
+)
 
 from .profile import TAXONOMY
 from .validate import FINDING_ID, SHA, Problem, _finding_id, _text
 
+SCHEMA_VERSION = 2
 REVIEW_TYPES = (
     "CONTRACT_REVIEW",
     "IMPLEMENTATION_REVIEW",
@@ -36,14 +61,18 @@ CLASS_OUTCOMES = ("CONFIRMED", "CORRECTED")
 ALIAS = re.compile(r"^[A-Z][A-Z0-9_]*$")
 NOT_APPLICABLE = "NOT_APPLICABLE"
 FENCE = re.compile(r"```ya?ml[ \t]*\r?\n(.*?)\r?\n```", re.DOTALL)
-"""Every fenced YAML block; `REVIEW_BLOCK` then decides which ones claim to be review headers."""
-REVIEW_BLOCK = re.compile(r"\A\s*review\s*:")
-"""A block whose first key is `review`, however its value is written (nested, inline, null)."""
+"""Every fenced YAML block, in document order; `discover` decides which ones are review claims."""
+
+UNSUPPORTED = "unsupported publication form"
+UNPARSABLE = "unparsable"
+INVALID_SHAPE = "invalid shape"
+REASONS = (UNSUPPORTED, UNPARSABLE, INVALID_SHAPE)
 
 TOP_REQUIRED = (
     "schema_version",
     "wp",
     "type",
+    "round",
     "complete",
     "reviewer",
     "author",
@@ -64,25 +93,97 @@ class _Check:
         self.problems.append(Problem("error", path, message))
 
 
-def parse_review_records(text: str) -> list[Any]:
-    """Every `review:` header found in `text`, as loaded YAML (any value; validation decides shape).
-    A block that is not valid YAML is returned as the string `"<unparsable>"` so it is counted and
-    reported, never silently dropped."""
-    found: list[Any] = []
-    for match in FENCE.finditer(text):
+# --- discovery (R7, R8 priority 1) -------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Claim:
+    """One review claim found in a comment: `record` is the loaded document (or None), `reason` is the
+    disposition decided before shape validation (`UNSUPPORTED`, `UNPARSABLE`) or None when the shape
+    validator decides; `ordinal` is the fence's position among the YAML fences of its comment."""
+
+    ordinal: int
+    record: Any
+    reason: str | None
+
+
+def discover(block: str) -> tuple[bool, bool]:
+    """R7: `(is_claim, unsupported)` from the scanner's token prefix up to the first key scalar.
+
+    The prefix must be StreamStart [Directive]* [DocumentStart]? [Anchor|Tag]* (Block|Flow)MappingStart
+    Key [Anchor|Tag]* Scalar; the block is a claim when that Scalar's value is `review`. `unsupported` is
+    true when any Anchor/Tag token appears in the prefix or the Key token is explicit (its start mark is
+    the `?` indicator). Any YAML error (reader or scanner) before the first key scalar means there is no
+    recognizable first entry: not a claim."""
+    unsupported = False
+    stage = "start"
+    try:
+        for token in yaml.scan(block):
+            if stage == "start":
+                if isinstance(token, StreamStartToken):
+                    stage = "prologue"
+                    continue
+                return False, False  # pragma: no cover  (the scanner's first token is always StreamStart)
+            if stage == "prologue":
+                if isinstance(token, DirectiveToken):
+                    continue
+                if isinstance(token, DocumentStartToken):
+                    stage = "root"
+                    continue
+                stage = "root"
+            if stage == "root":
+                if isinstance(token, (AnchorToken, TagToken)):
+                    unsupported = True
+                    continue
+                if isinstance(token, (BlockMappingStartToken, FlowMappingStartToken)):
+                    stage = "key"
+                    continue
+                return False, False  # a root scalar, sequence or anything else: no mapping entry
+            if stage == "key":
+                if not isinstance(token, KeyToken):
+                    return False, False
+                if block[token.start_mark.index : token.start_mark.index + 1] == "?":
+                    unsupported = True
+                stage = "key-node"
+                continue
+            if stage == "key-node":
+                if isinstance(token, (AnchorToken, TagToken)):
+                    unsupported = True
+                    continue
+                if isinstance(token, ScalarToken):
+                    return (True, unsupported) if token.value == "review" else (False, False)
+                return False, False  # a collection or alias key is not the scalar key `review`
+    except yaml.YAMLError:
+        return False, False
+    return False, False  # pragma: no cover  (the scanner always ends with StreamEnd, handled above)
+
+
+def parse_review_records(text: str) -> list[Claim]:
+    """Every review claim in `text` (R7), each with its disposition reason when decided before shape
+    validation (R8 priorities 1-2) or its loaded record otherwise. Never raises; nothing recognizable is
+    dropped (R10)."""
+    claims: list[Claim] = []
+    for ordinal, match in enumerate(FENCE.finditer(text)):
         block = match.group(1)
-        if not REVIEW_BLOCK.match(block):
-            continue  # an ordinary YAML block (a state block, an example): not a review header
+        is_claim, unsupported = discover(block)
+        if not is_claim:
+            continue
+        if unsupported:
+            claims.append(Claim(ordinal, None, UNSUPPORTED))
+            continue
         try:
-            found.append(yaml.safe_load(block))
-        except Exception:  # totality: a bad block is a diagnostic, never a traceback
-            found.append("<unparsable>")
-    return found
+            claims.append(Claim(ordinal, yaml.safe_load(block), None))
+        except yaml.YAMLError:
+            claims.append(Claim(ordinal, None, UNPARSABLE))
+    return claims
 
 
 def _unknown(keys: Any, allowed: set[str]) -> list[str]:
-    """Unknown keys as sorted strings; any YAML key type is tolerated (R003)."""
+    """Unknown keys as sorted strings; any YAML key type is tolerated."""
     return sorted(str(k) for k in keys if k not in allowed)
+
+
+# --- shape (R8 priority 3) ----------------------------------------------------------------------------
 
 
 def validate_review(record: Any) -> list[Problem]:
@@ -102,15 +203,20 @@ def validate_review(record: Any) -> list[Problem]:
     if extra:
         c.error("review", f"unknown keys {extra}")
     version = r.get("schema_version")
-    if "schema_version" in r and (not isinstance(version, int) or isinstance(version, bool) or version != 1):
+    if "schema_version" in r and (
+        not isinstance(version, int) or isinstance(version, bool) or version != SCHEMA_VERSION
+    ):
         c.error(
             "review.schema_version",
-            f"unsupported review schema_version {r['schema_version']!r} (supported: 1)",
+            f"unsupported review schema_version {version!r} (supported: {SCHEMA_VERSION})",
         )
     if "wp" in r and not _text(r["wp"]):
         c.error("review.wp", "must be a non-empty string")
     if "type" in r and r["type"] not in REVIEW_TYPES:
         c.error("review.type", f"must be one of {', '.join(REVIEW_TYPES)}, got {r['type']!r}")
+    rnd = r.get("round")
+    if "round" in r and (not isinstance(rnd, int) or isinstance(rnd, bool) or rnd < 1):
+        c.error("review.round", f"must be a positive integer (the reviewer's own event count), got {rnd!r}")
     for key in ("complete", "new_evidence"):
         if key in r and not isinstance(r[key], bool):
             c.error(f"review.{key}", f"must be a boolean, got {r[key]!r}")
@@ -238,21 +344,86 @@ def _closed(c: _Check, closed: Any) -> None:
             c.error(path, f"unknown keys {extra}")
 
 
-# --- counters and metrics ---------------------------------------------------------------------------
+# --- identity, mirrors, conflicts, chronology (R1-R6) ------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Copy:
+    """One published copy of a review claim: the remote's publication metadata plus the claim."""
+
+    created_at: str
+    comment_id: int
+    claim: Claim
+
+
+@dataclass
+class Selection:
+    """The distinct, valid review events of one work package, in publication order, with everything
+    that was excluded from them made visible."""
+
+    events: list[dict[str, Any]] = field(default_factory=list)
+    mirrors: int = 0
+    conflicts: list[str] = field(default_factory=list)
+    invalid: dict[str, int] = field(default_factory=lambda: dict.fromkeys(REASONS, 0))
+    multi_header_comments: int = 0
+
+    @property
+    def invalid_total(self) -> int:
+        return sum(self.invalid.values())
+
+
+def select_reviews(copies: list[Copy], wp: str) -> Selection:
+    """R1-R6 over the published copies of one work package."""
+    s = Selection()
+    per_comment: Counter[int] = Counter()
+    groups: dict[tuple[str, str, int], list[tuple[tuple[str, int, int, int], str, dict[str, Any]]]] = {}
+    for copy in copies:
+        per_comment[copy.comment_id] += 1
+        claim = copy.claim
+        if claim.reason is not None:
+            s.invalid[claim.reason] += 1
+            continue
+        if validate_review(claim.record):
+            s.invalid[INVALID_SHAPE] += 1
+            continue
+        header = claim.record["review"]
+        if header["wp"] != wp:
+            continue  # another work package's record published here: not this WP's evidence
+        identity = (str(header["wp"]), str(header["reviewer"]), int(header["round"]))
+        key = (copy.created_at, int(header["round"]), copy.comment_id, claim.ordinal)
+        canonical = json.dumps(header, sort_keys=True, default=str)
+        groups.setdefault(identity, []).append((key, canonical, header))
+    s.multi_header_comments = sum(1 for n in per_comment.values() if n > 1)
+    ordered: list[tuple[tuple[str, int, int, int], dict[str, Any]]] = []
+    for identity, members in groups.items():
+        if len({canonical for _, canonical, _ in members}) > 1:
+            s.conflicts.append(f"(wp={identity[0]}, reviewer={identity[1]}, round={identity[2]})")
+            continue
+        s.mirrors += len(members) - 1
+        representative = min(members, key=lambda m: m[0])
+        ordered.append((representative[0], representative[2]))
+    s.conflicts.sort()
+    s.events = [header for _, header in sorted(ordered, key=lambda m: m[0])]
+    return s
+
+
+# --- counters and metrics (§11.8, §14.6) ------------------------------------------------------------
 
 
 @dataclass
 class Counters:
-    """The §11.8 triggers from the recorded reviews of one work package."""
+    """The §11.8 triggers from the distinct review events of one work package."""
 
     reviews: int = 0
-    survived: dict[str, int] = field(default_factory=dict)  # blocking finding id -> reviews it survived
+    survived: dict[str, int] = field(default_factory=dict)  # blocking finding id -> events it survived
     successors: dict[str, list[str]] = field(default_factory=dict)  # surface -> distinct blocking ids
     rejected_complete: int = 0
     rounds_without_new_evidence: int = 0
     consecutive_without_new_evidence: int = 0
-    invalid: int = 0
-    duplicates: int = 0
+    mirrors: int = 0
+    conflicts: list[str] = field(default_factory=list)
+    invalid: dict[str, int] = field(default_factory=lambda: dict.fromkeys(REASONS, 0))
+    multi_header_comments: int = 0
 
     @property
     def a_fired(self) -> list[str]:
@@ -266,35 +437,21 @@ class Counters:
     def c_fired(self) -> bool:
         return self.rejected_complete >= 3
 
-
-def select_reviews(records: list[Any], wp: str) -> tuple[list[dict[str, Any]], int, int]:
-    """The valid, distinct review headers for `wp`, in the order given; the number of invalid headers
-    seen; and the number of transport copies ignored. One review event is routinely published verbatim
-    on the coordination issue and on each candidate PR: identical headers are one event, counted once
-    (`PROC-KIT-P3-R001`). Two headers differ in any field are two events."""
-    valid: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    invalid = duplicates = 0
-    for record in records:
-        if validate_review(record):
-            invalid += 1
-            continue
-        review = record["review"]
-        if review["wp"] != wp:
-            continue
-        key = json.dumps(review, sort_keys=True, default=str)
-        if key in seen:
-            duplicates += 1
-            continue
-        seen.add(key)
-        valid.append(review)
-    return valid, invalid, duplicates
+    @property
+    def invalid_total(self) -> int:
+        return sum(self.invalid.values())
 
 
-def counters(reviews: list[dict[str, Any]], invalid: int = 0, duplicates: int = 0) -> Counters:
-    k = Counters(reviews=len(reviews), invalid=invalid, duplicates=duplicates)
+def counters(selection: Selection) -> Counters:
+    k = Counters(
+        reviews=len(selection.events),
+        mirrors=selection.mirrors,
+        conflicts=list(selection.conflicts),
+        invalid=dict(selection.invalid),
+        multi_header_comments=selection.multi_header_comments,
+    )
     streak = 0
-    for r in reviews:
+    for r in selection.events:
         if r["verdict"] == "HANDOFF_BLOCKED":
             continue  # not a review of the candidate (§11.11)
         for f in r["findings"]:
@@ -316,10 +473,26 @@ def counters(reviews: list[dict[str, Any]], invalid: int = 0, duplicates: int = 
 
 
 def trigger_statement(k: Counters) -> str:
-    """The mandatory §11.8 trigger statement, from recorded evidence only."""
-    ignored = f"; {k.invalid} invalid header(s) ignored" if k.invalid else ""
-    copies = f"; {k.duplicates} transport cop{'y' if k.duplicates == 1 else 'ies'} of the same event ignored"
-    lines = [f"{k.reviews} distinct review event(s) read{ignored}{copies if k.duplicates else ''}"]
+    """The mandatory §11.8 trigger statement, from recorded evidence only. Excluded evidence is listed so it
+    is never mistaken for a negative result."""
+    lines = [f"{k.reviews} distinct review event(s) read, ordered by publication time."]
+    if k.mirrors:
+        lines.append(
+            f"{k.mirrors} transport cop{'y' if k.mirrors == 1 else 'ies'} of the same event ignored."
+        )
+    if k.conflicts:
+        lines.append(
+            f"EXCLUDED: {len(k.conflicts)} conflicting identit{'y' if len(k.conflicts) == 1 else 'ies'} "
+            f"(copies with the same identity but different values; not resolved): {'; '.join(k.conflicts)}."
+        )
+    if k.invalid_total:
+        parts = [f"{n} {reason}" for reason, n in k.invalid.items() if n]
+        lines.append(f"EXCLUDED: {k.invalid_total} invalid review header(s): {', '.join(parts)}.")
+    if k.multi_header_comments:
+        lines.append(
+            f"{k.multi_header_comments} comment(s) carry more than one header; their order rests on fence "
+            "position."
+        )
     if k.a_fired:
         lines.append(f"Trigger A HAS FIRED: {', '.join(k.a_fired)} survived two or more independent reviews.")
     else:
@@ -343,16 +516,16 @@ def trigger_statement(k: Counters) -> str:
         "CONVERGENCE TRIGGER FIRED: enter CONTRACT_CONVERGENCE, or state why a single targeted fix closes "
         "the surface (routing.md RT-6 where routing is delegated)."
         if fired
-        else "No trigger fired. Proceeding with ordinary remediation is permitted."
+        else "No trigger fired in the recorded events. The coordinator's own section 11.8 check against the "
+        "full review history, including anything excluded above, remains mandatory."
     )
     return "\n".join(lines)
 
 
-def metrics(
-    workflow: dict[str, Any], reviews: list[dict[str, Any]], invalid: int = 0, duplicates: int = 0
-) -> dict[str, Any]:
-    """The §14.6 metrics available from the state block and the recorded reviews."""
-    k = counters(reviews, invalid, duplicates)
+def metrics(workflow: dict[str, Any], selection: Selection) -> dict[str, Any]:
+    """The §14.6 metrics available from the state block and the recorded review events."""
+    k = counters(selection)
+    reviews = selection.events
     by_class: Counter[str] = Counter()
     by_tier: Counter[str] = Counter()
     closed_nc = closed_na = 0
@@ -392,15 +565,25 @@ def metrics(
         "routes_taken": sorted(Counter(str(r) for r in route_ids).items()),
         "owner_questions_routed": sum(1 for r in route_ids if r in ("RT-4", "RT-6")),
         "triggers": {"A": k.a_fired, "B": k.b_fired, "C": k.c_fired},
-        "invalid_review_headers": invalid,
-        "transport_copies_ignored": duplicates,
+        "transport_copies_ignored": k.mirrors,
+        "conflicting_identities": list(k.conflicts),
+        "invalid_review_headers": dict(k.invalid),
+        "comments_with_multiple_headers": k.multi_header_comments,
     }
 
 
 __all__ = [
     "FINDING_ID",
+    "INVALID_SHAPE",
+    "SCHEMA_VERSION",
+    "UNPARSABLE",
+    "UNSUPPORTED",
+    "Claim",
+    "Copy",
     "Counters",
+    "Selection",
     "counters",
+    "discover",
     "metrics",
     "parse_review_records",
     "select_reviews",

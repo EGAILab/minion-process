@@ -11,9 +11,10 @@ candidate PRs) and never writes one. The prose below the header stays as before.
 ````markdown
 ```yaml
 review:
-  schema_version: 1
+  schema_version: 2
   wp: <work package id>
   type: CONTRACT_REVIEW | IMPLEMENTATION_REVIEW | TARGETED_CLOSURE | CHECKPOINT | FINAL_REVIEW | CLOSURE_REVIEW | PROCESS_REVIEW
+  round: 1                          # this reviewer's own count of its review events on this WP; same on every copy of one event
   complete: true                    # complete review of the candidate; false for a targeted closure
   reviewer: <agent>                 # must differ from author
   author: <agent>
@@ -30,8 +31,19 @@ review:
 ```
 ````
 
-Publishing the same record verbatim on the coordination issue and on each candidate PR is normal
-transport: identical headers are one review event and the tool counts them once.
+**Identity and transport (convergence contract `CE-PROC-P3A-01`).** One review event is
+`(wp, reviewer, round)`. Publishing the same record on the coordination issue and on each candidate PR is
+normal transport: copies with equal parsed values are one event, counted once, whatever their line
+endings, key quoting, key order or comments. A separately issued verdict, even with every other field
+equal, is a new `round`. Copies with the same identity but different values are a **conflict**: the tool
+reports the identity and excludes them, and never chooses between them. Events are ordered by the
+publication time of their earliest copy.
+
+**How to publish the header.** Write it as a block mapping whose first line is `review:` (or
+`"review":`), or as a flow mapping `{review: …}`, optionally after YAML directives or a `---` line. Do
+not put anchors, tags or explicit-key syntax (`? review`) on the root or the key: the tool recognizes
+such headers as review claims but records them as `unsupported publication form`, never as events.
+Several headers in one comment are allowed; they are ordered by their position in the comment.
 
 Rules the tool enforces: `reviewer` differs from `author`; `APPROVED` carries no blocking finding;
 `HANDOFF_BLOCKED` carries no findings; every closed finding records its negative control, or

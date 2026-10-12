@@ -60,6 +60,18 @@ class FakeGitHub:
         self.issue_comments: dict[tuple[str, int], list[str]] = {}
         self.closed: list[tuple[str, int, str]] = []
 
+    def published(self, repo: str, number: int, index: int, entry: Any) -> dict[str, Any]:
+        """A stored comment as the API returns it. A plain string gets a deterministic id and timestamp
+        (increasing with position, distinct per issue); a mapping supplies its own `id`/`created_at`."""
+        if isinstance(entry, dict):
+            return {"id": entry["id"], "created_at": entry["created_at"], "body": entry["body"]}
+        cid = number * 1000 + index + 1
+        return {
+            "id": cid,
+            "created_at": f"2026-10-12T{(cid // 3600) % 24:02d}:{(cid // 60) % 60:02d}:{cid % 60:02d}Z",
+            "body": entry,
+        }
+
     def run(self, args: list[str], stdin: str | None) -> str:
         from minion_process.github import GitHubError
 
@@ -98,7 +110,10 @@ class FakeGitHub:
             path = args[3]
             repo = path.removeprefix("repos/").split("/issues/")[0]
             number = int(path.split("/issues/")[1].split("/")[0])
-            page = [{"body": b} for b in self.issue_comments.get((repo, number), [])]
+            page = [
+                self.published(repo, number, i, entry)
+                for i, entry in enumerate(self.issue_comments.get((repo, number), []))
+            ]
             return json.dumps([page]) if page else ""
         if head == "api" and args[1] == "graphql":
             if self.history_fails:

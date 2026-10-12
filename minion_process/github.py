@@ -105,18 +105,20 @@ class GitHub:
     def comment_body(self, repo: str, comment_id: str) -> str:
         return self._run(["api", f"repos/{repo}/issues/comments/{comment_id}", "--jq", ".body"], None)
 
-    def issue_comments(self, repo: str, number: int) -> list[str]:
-        """Every comment body on an issue or PR, oldest first (PR conversation comments are issue
-        comments). Paginated and slurped so the pages come back as one JSON array of arrays."""
+    def issue_comments(self, repo: str, number: int) -> list[dict[str, Any]]:
+        """Every comment on an issue or PR as `{id, created_at, body}` (PR conversation comments are issue
+        comments). Paginated and slurped so the pages come back as one JSON array of arrays. The `id`
+        and `created_at` are the remote's publication metadata the review chronology rests on; a comment
+        missing any of the three fields is skipped (it cannot be ordered or read)."""
         out = self._run(["api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"], None)
         pages = json.loads(out) if out.strip() else []
-        bodies: list[str] = []
+        comments: list[dict[str, Any]] = []
         for page in pages:
             for comment in page:
-                body = comment.get("body")
-                if isinstance(body, str):
-                    bodies.append(body)
-        return bodies
+                body, cid, created = comment.get("body"), comment.get("id"), comment.get("created_at")
+                if isinstance(body, str) and isinstance(cid, int) and isinstance(created, str):
+                    comments.append({"id": cid, "created_at": created, "body": body})
+        return comments
 
     def close_issue(self, repo: str, number: int, comment: str) -> None:
         self._run(

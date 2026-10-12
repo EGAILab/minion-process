@@ -1,5 +1,6 @@
-"""Structured review headers (kit 0.3.0): parsing, every shape rule, the §11.8 counters, the trigger
-statement and the §14.6 metrics; and the offline `review-check` verb."""
+"""Structured review headers (kit 0.3.0, schema version 2): every shape rule of `validate_review`, with
+one mutation per rule; the counters over a prepared selection; the metrics; the offline `review-check`.
+Discovery, identity and chronology are covered by `tests/test_p3a_convergence.py`."""
 
 from __future__ import annotations
 
@@ -12,9 +13,10 @@ import yaml
 
 from minion_process.cli import main
 from minion_process.review import (
+    Claim,
+    Copy,
     counters,
     metrics,
-    parse_review_records,
     select_reviews,
     trigger_statement,
     validate_review,
@@ -24,9 +26,10 @@ from .test_minion_process import SHA_A, SHA_B, workflow
 
 GOOD: dict[str, Any] = {
     "review": {
-        "schema_version": 1,
+        "schema_version": 2,
         "wp": "WP-X",
         "type": "IMPLEMENTATION_REVIEW",
+        "round": 1,
         "complete": True,
         "reviewer": "Codex",
         "author": "Claude",
@@ -55,21 +58,20 @@ def good(**over: Any) -> dict[str, Any]:
     return record
 
 
-def problems(record: Any) -> list[str]:
-    return [str(p) for p in validate_review(record)]
-
-
 def render(record: dict[str, Any], prose: str = "Prose below.\n") -> str:
     return "# Review\n\n```yaml\n" + yaml.safe_dump(record, sort_keys=False) + "```\n\n" + prose
 
 
-def test_good_record_validates_and_round_trips_through_the_fence() -> None:
-    assert problems(good()) == []
-    records = parse_review_records(render(good()))
-    assert records == [good()]
-    assert parse_review_records("no header here") == []
-    assert parse_review_records("```yaml\nreview:\n  - [unclosed\n```") == ["<unparsable>"]
-    assert parse_review_records("```yaml\nworkflow:\n  a: 1\n```") == []  # a state block is not a review
+def selection(*headers: dict[str, Any]) -> Any:
+    """A selection built from valid records published one minute apart."""
+    copies = [
+        Copy(f"2026-10-12T00:{i:02d}:00Z", i + 1, Claim(0, record, None)) for i, record in enumerate(headers)
+    ]
+    return select_reviews(copies, "WP-X")
+
+
+def test_good_record_validates() -> None:
+    assert validate_review(good()) == []
 
 
 @pytest.mark.parametrize(
@@ -78,10 +80,15 @@ def test_good_record_validates_and_round_trips_through_the_fence() -> None:
         ([], "review"),
         ({"review": 1}, "review"),
         ({"review": GOOD["review"], "extra": 1}, "review"),
-        (good(schema_version=2), "review.schema_version"),
+        (good(schema_version=1), "review.schema_version"),
+        (good(schema_version=True), "review.schema_version"),
+        (good(schema_version=2.0), "review.schema_version"),
         (good(surprise=1), "review"),
         (good(wp=""), "review.wp"),
         (good(type="FULL"), "review.type"),
+        (good(round=0), "review.round"),
+        (good(round=True), "review.round"),
+        (good(round="1"), "review.round"),
         (good(complete="yes"), "review.complete"),
         (good(new_evidence=None), "review.new_evidence"),
         (good(reviewer=" "), "review.reviewer"),
@@ -106,7 +113,7 @@ def test_good_record_validates_and_round_trips_through_the_fence() -> None:
             "review.class_confirmation.kind",
         ),
         (
-            good(class_confirmation={"kind": "p", "class": "g", "rule": "r", "outcome": "CONFIRMED", "x": 1}),
+            good(class_confirmation={"kind": "p", "class": "g", "rule": "r", "outcome": "CONFIRMED", 3: 1}),
             "review.class_confirmation",
         ),
         (good(verdict="LGTM"), "review.verdict"),
@@ -132,9 +139,7 @@ def test_good_record_validates_and_round_trips_through_the_fence() -> None:
             "review.findings[0].surface",
         ),
         (
-            good(
-                findings=[{"id": "WPX-R001", "class": "CONTRACT_ASSURANCE_DEFECT", "blocking": True, "x": 1}]
-            ),
+            good(findings=[{"id": "WPX-R001", "class": "CONTRACT_ASSURANCE_DEFECT", "blocking": True, 2: 0}]),
             "review.findings[0]",
         ),
         (
@@ -146,20 +151,21 @@ def test_good_record_validates_and_round_trips_through_the_fence() -> None:
         (good(closed=[{"id": "x", "negative_control": "m"}]), "review.closed[0].id"),
         (good(closed=[{"id": "WPX-R000"}]), "review.closed[0].negative_control"),
         (good(closed=[{"id": "WPX-R000", "negative_control": "NOT_APPLICABLE"}]), "review.closed[0].reason"),
-        (good(closed=[{"id": "WPX-R000", "negative_control": "m", "x": 1}]), "review.closed[0]"),
+        (good(closed=[{"id": "WPX-R000", "negative_control": "m", None: 1}]), "review.closed[0]"),
+        ({"review": {**GOOD["review"], 7: "x", "unknown": 1}}, "review"),
     ],
 )
 def test_one_mutation_per_rule(record: Any, path: str) -> None:
-    found = [p.path for p in validate_review(record)]
+    found = [p.path for p in validate_review(record)]  # must not raise for any YAML key type
     assert path in found, found
 
 
 def test_missing_required_keys_are_each_reported() -> None:
-    record = {"review": {"schema_version": 1}}
-    found = [p.path for p in validate_review(record)]
+    found = [p.path for p in validate_review({"review": {"schema_version": 2}})]
     for key in (
         "wp",
         "type",
+        "round",
         "complete",
         "reviewer",
         "author",
@@ -184,15 +190,11 @@ def test_documentary_closure_and_approval_without_blockers_are_valid() -> None:
             }
         ],
     )
-    assert problems(record) == []
-    assert problems(good(verdict="HANDOFF_BLOCKED", findings=[])) == []
+    assert validate_review(record) == []
+    assert validate_review(good(verdict="HANDOFF_BLOCKED", findings=[])) == []
 
 
-# --- counters -------------------------------------------------------------------------------------
-
-
-def review(**over: Any) -> dict[str, Any]:
-    return good(**over)["review"]
+# --- counters over a prepared selection -------------------------------------------------------------------
 
 
 def finding(fid: str, surface: str | None = None, blocking: bool = True) -> dict[str, Any]:
@@ -202,45 +204,41 @@ def finding(fid: str, surface: str | None = None, blocking: bool = True) -> dict
     return f
 
 
-def test_select_reviews_filters_by_wp_and_counts_invalid_headers() -> None:
-    records = [good(), good(wp="WP-OTHER"), {"review": 1}, "<unparsable>"]
-    reviews, invalid, duplicates = select_reviews(records, "WP-X")
-    assert len(reviews) == 1 and invalid == 2 and duplicates == 0
-
-
 def test_counters_and_triggers() -> None:
-    reviews = [
-        review(findings=[finding("WPX-R001", "s1")]),
-        review(
-            complete=False, type="TARGETED_CLOSURE", findings=[finding("WPX-R001", "s1")], new_evidence=False
+    s = selection(
+        good(round=1, findings=[finding("WPX-R001", "s1")]),
+        good(
+            round=2,
+            complete=False,
+            type="TARGETED_CLOSURE",
+            findings=[finding("WPX-R001", "s1")],
+            new_evidence=False,
         ),
-        review(findings=[finding("WPX-R002", "s1")], new_evidence=False),
-        review(verdict="HANDOFF_BLOCKED", findings=[]),
-        review(verdict="APPROVED", findings=[], new_evidence=True),
-    ]
-    k = counters(reviews, invalid=1)
-    assert k.reviews == 5 and k.invalid == 1
-    assert k.survived == {"WPX-R001": 2, "WPX-R002": 1}
-    assert k.a_fired == ["WPX-R001"]
+        good(round=3, findings=[finding("WPX-R002", "s1")], new_evidence=False),
+        good(round=4, verdict="HANDOFF_BLOCKED", findings=[]),
+        good(round=5, verdict="APPROVED", findings=[], new_evidence=True),
+    )
+    k = counters(s)
+    assert k.reviews == 5
+    assert k.survived == {"WPX-R001": 2, "WPX-R002": 1} and k.a_fired == ["WPX-R001"]
     assert k.successors == {"s1": ["WPX-R001", "WPX-R002"]} and k.b_fired == ["s1"]
     assert k.rejected_complete == 2 and not k.c_fired
     assert k.rounds_without_new_evidence == 2 and k.consecutive_without_new_evidence == 2
     text = trigger_statement(k)
-    assert "Trigger A HAS FIRED: WPX-R001" in text
-    assert "Trigger B HAS FIRED" in text and "Trigger C has not fired: 2" in text
-    assert "1 invalid header(s) ignored" in text and "CONVERGENCE TRIGGER FIRED" in text
+    assert "Trigger A HAS FIRED: WPX-R001" in text and "Trigger B HAS FIRED" in text
+    assert "Trigger C has not fired: 2" in text and "CONVERGENCE TRIGGER FIRED" in text
 
 
 def test_no_trigger_statement_and_c_trigger() -> None:
-    quiet = counters([review(findings=[finding("WPX-R001")])])
+    quiet = counters(selection(good(findings=[finding("WPX-R001")])))
     text = trigger_statement(quiet)
     assert "Trigger A has not fired" in text and "(max 1)" in text and "No trigger fired" in text
-    three = counters([review(findings=[finding(f"WPX-R00{i}")]) for i in range(3)])
+    three = counters(selection(*(good(round=i + 1, findings=[finding(f"WPX-R00{i}")]) for i in range(3))))
     assert three.c_fired and "Trigger C HAS FIRED: 3" in trigger_statement(three)
-    assert trigger_statement(counters([])).startswith("0 distinct review event(s) read")
+    assert trigger_statement(counters(selection())).startswith("0 distinct review event(s) read")
 
 
-def test_metrics_from_state_and_reviews() -> None:
+def test_metrics_from_state_and_selection() -> None:
     w = workflow(
         schema_version=2,
         kind="process",
@@ -250,9 +248,10 @@ def test_metrics_from_state_and_reviews() -> None:
             "routes": [{"rule": "RT-2", "at": "d", "reason": "r"}, {"rule": "RT-6", "at": "d", "reason": "r"}]
         },
     )
-    reviews = [
-        review(),
-        review(
+    s = selection(
+        good(),
+        good(
+            round=2,
             verdict="APPROVED",
             complete=False,
             type="TARGETED_CLOSURE",
@@ -260,8 +259,8 @@ def test_metrics_from_state_and_reviews() -> None:
             findings=[],
             closed=[{"id": "WPX-R001", "negative_control": "NOT_APPLICABLE", "reason": "documentary"}],
         ),
-    ]
-    m = metrics(w, reviews, invalid=1)
+    )
+    m = metrics(w, s)
     assert m["work_package"] == "WP-X" and m["kind"] == "process" and m["class"] == "governing"
     assert m["review_events"] == 2 and m["complete_reviews"] == 1 and m["targeted_reviews"] == 1
     assert m["approvals"] == 1 and m["rejected_complete_reviews"] == 1 and m["handoff_blocked"] == 0
@@ -270,8 +269,8 @@ def test_metrics_from_state_and_reviews() -> None:
     assert m["closed_with_negative_control"] == 1 and m["closed_documentary"] == 1
     assert m["gate_tiers_verified"] == {"G1": 1, "G3": 1}
     assert m["routes_taken"] == [("RT-2", 1), ("RT-6", 1)] and m["owner_questions_routed"] == 1
-    assert m["triggers"] == {"A": [], "B": [], "C": False} and m["invalid_review_headers"] == 1
-    bare = metrics(workflow(), [])
+    assert m["triggers"] == {"A": [], "B": [], "C": False}
+    bare = metrics(workflow(), selection())
     assert bare["kind"] is None and bare["class"] is None and bare["routes_taken"] == []
 
 
