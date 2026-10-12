@@ -1,6 +1,6 @@
 [project]
 name = "minion-process"
-version = "0.2.0"
+version = "0.3.0"
 description = "Minion-Process: the reusable two-agent process kit and its workflow-mechanics CLI"
 requires-python = ">=3.12"
 dependencies = ["pyyaml>=6"]

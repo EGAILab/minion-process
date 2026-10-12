@@ -1,12 +1,17 @@
 """`minion-process`: deterministic workflow mechanics. Semantics stay with the agents.
 
     python -m minion_process profile validate <profile.yaml>
+    python -m minion_process review-check <review-record.md>
     python -m minion_process status <issue>
     python -m minion_process validate <issue> | --file <body.md>
     python -m minion_process transition-check <FROM> <TO>
     python -m minion_process apply <issue> <patch.py> [--dry-run]
+    python -m minion_process handoff <issue> --to <owner> --action <text> [--status <S>] [--sha side=<sha>]...
+    python -m minion_process close <issue> --comment-file <file> [--dry-run]
     python -m minion_process handoff-check <issue>
     python -m minion_process candidate-check <issue> [--ready]
+    python -m minion_process convergence counters <issue>
+    python -m minion_process metrics <issue> [--out <file>]
     python -m minion_process merge <code|docs|owner/repo> <pr> <sha>
     python -m minion_process comment <code|docs|owner/repo> <number> <file> [--pr]
 
@@ -19,7 +24,12 @@ import argparse
 import runpy
 import sys
 from pathlib import Path
+from typing import Any
 
+import yaml
+
+from .composite import close as composite_close
+from .composite import handoff as composite_handoff
 from .github import CODE_REPO, REPOS, GitHub
 from .model import BodyFormatError, candidates, split_body
 from .ops import (
@@ -32,12 +42,37 @@ from .ops import (
     verified_comment,
 )
 from .profile import load_profile
+from .review import (
+    counters,
+    metrics,
+    parse_review_records,
+    select_reviews,
+    trigger_statement,
+    validate_review,
+)
 from .transitions import check_transition
 from .validate import errors, validate_workflow
 
 
 def _repo(name: str) -> str:
     return REPOS.get(name, name)
+
+
+def _collect_reviews(gh: GitHub, repo: str, number: int) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
+    """The state block plus every valid review header published on the issue and its candidate PRs."""
+    workflow = split_body(gh.issue(repo, number)["body"]).workflow
+    invalid = errors(validate_workflow(workflow))
+    if invalid:
+        raise CheckFailed("current state invalid: " + "; ".join(map(str, invalid)))
+    bodies = list(gh.issue_comments(repo, number))
+    for side, entry in candidates(workflow).items():
+        if isinstance(entry, dict) and entry.get("pr"):
+            bodies += gh.issue_comments(REPOS[side], int(entry["pr"]))
+    records: list[Any] = []
+    for body in bodies:
+        records += parse_review_records(body)
+    reviews, bad = select_reviews(records, str(workflow["work_package"]))
+    return workflow, reviews, bad
 
 
 def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
@@ -47,6 +82,7 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
     profile = sub.add_parser("profile")
     profile.add_argument("action", choices=["validate"])
     profile.add_argument("path")
+    sub.add_parser("review-check").add_argument("file")
     sub.add_parser("status").add_argument("issue", type=int)
     validate = sub.add_parser("validate")
     validate.add_argument("issue", type=int, nargs="?")
@@ -60,10 +96,27 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
     apply.add_argument("--dry-run", action="store_true")
     apply.add_argument("--repair", action="store_true", help="restore an earlier revision (restore only)")
     apply.add_argument("--revision", help="the issue edit-history revision id to restore (with --repair)")
+    handoff = sub.add_parser("handoff")
+    handoff.add_argument("issue", type=int)
+    handoff.add_argument("--to", required=True)
+    handoff.add_argument("--action", required=True)
+    handoff.add_argument("--status")
+    handoff.add_argument("--sha", action="append", default=[], metavar="SIDE=SHA")
+    handoff.add_argument("--dry-run", action="store_true")
+    close = sub.add_parser("close")
+    close.add_argument("issue", type=int)
+    close.add_argument("--comment-file", required=True)
+    close.add_argument("--dry-run", action="store_true")
     sub.add_parser("handoff-check").add_argument("issue", type=int)
     candidate = sub.add_parser("candidate-check")
     candidate.add_argument("issue", type=int)
     candidate.add_argument("--ready", action="store_true")
+    convergence = sub.add_parser("convergence")
+    convergence.add_argument("action", choices=["counters"])
+    convergence.add_argument("issue", type=int)
+    metrics_cmd = sub.add_parser("metrics")
+    metrics_cmd.add_argument("issue", type=int)
+    metrics_cmd.add_argument("--out")
     merge = sub.add_parser("merge")
     merge.add_argument("repo")
     merge.add_argument("pr", type=int)
@@ -77,6 +130,17 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
 
     if args.command == "profile":  # offline: no `gh`, no network
         _, problems = load_profile(Path(args.path))
+        for problem in problems:
+            print(problem)
+        print("INVALID" if errors(problems) else "VALID")
+        return 1 if errors(problems) else 0
+    if args.command == "review-check":  # offline
+        records = parse_review_records(Path(args.file).read_text(encoding="utf-8"))
+        if len(records) != 1:
+            print(f"ERROR: review: expected exactly one `review:` header, found {len(records)}")
+            print("INVALID")
+            return 1
+        problems = validate_review(records[0])
         for problem in problems:
             print(problem)
         print("INVALID" if errors(problems) else "VALID")
@@ -137,6 +201,27 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
             )
             print(("DRY-RUN OK " if args.dry_run else "COMMITTED ") + f"#{args.issue} {changed}")
             return 0
+        if args.command == "handoff":
+            shas: dict[str, str] = {}
+            for item in args.sha:
+                side, _, sha = item.partition("=")
+                shas[side] = sha
+            changed, report = composite_handoff(
+                gh, args.repo, args.issue, args.to, args.action, args.status, shas, args.dry_run
+            )
+            for label in report.ok:
+                print(f"  ok   {label}")
+            print(
+                ("DRY-RUN OK " if args.dry_run else "HANDED OFF ") + f"#{args.issue} -> {args.to} {changed}"
+            )
+            return 0
+        if args.command == "close":
+            text = Path(args.comment_file).read_text(encoding="utf-8")
+            changed, merged = composite_close(gh, args.repo, args.issue, text, args.dry_run)
+            for side, oid in sorted(merged.items()):
+                print(f"  ok   {side} merged {oid}")
+            print(("DRY-RUN OK " if args.dry_run else "CLOSED ") + f"#{args.issue} {changed}")
+            return 0
         if args.command in ("handoff-check", "candidate-check"):
             if args.command == "handoff-check":
                 report = handoff_report(gh, args.repo, args.issue)
@@ -151,9 +236,22 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
                 print(f"  FAIL {label}")
             print(verdict if report.failed else "OK")
             return 1 if report.failed else 0
+        if args.command == "convergence":
+            _, reviews, bad = _collect_reviews(gh, args.repo, args.issue)
+            print(trigger_statement(counters(reviews, bad)))
+            return 0
+        if args.command == "metrics":
+            workflow, reviews, bad = _collect_reviews(gh, args.repo, args.issue)
+            text = yaml.safe_dump(metrics(workflow, reviews, bad), sort_keys=False)
+            if args.out:
+                Path(args.out).write_text(text, encoding="utf-8")
+                print(f"metrics written to {args.out}")
+            else:
+                print(text, end="")
+            return 0
         if args.command == "merge":
-            merged = guarded_merge(gh, _repo(args.repo), args.pr, args.sha)
-            print(f"MERGED #{args.pr} -> {merged} (reachable from the default branch)")
+            merged_sha = guarded_merge(gh, _repo(args.repo), args.pr, args.sha)
+            print(f"MERGED #{args.pr} -> {merged_sha} (reachable from the default branch)")
             return 0
         if args.command == "comment":
             text = Path(args.file).read_text(encoding="utf-8")

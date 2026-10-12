@@ -3,6 +3,39 @@
 One per review event (`WORKFLOW.md` §11.2.1, §9.2, §9.2.1). Written as a file so it can be published
 verbatim with its whole-file hash when the reviewer cannot post it.
 
+**Structured header (kit 0.3.0, record §6.6).** The record starts with one fenced YAML block whose only
+top-level key is `review`. The tool reads it (`minion-process review-check <file>` validates it;
+`convergence counters` and `metrics` collect the headers published on the coordination issue and the
+candidate PRs) and never writes one. The prose below the header stays as before.
+
+````markdown
+```yaml
+review:
+  schema_version: 1
+  wp: <work package id>
+  type: CONTRACT_REVIEW | IMPLEMENTATION_REVIEW | TARGETED_CLOSURE | CHECKPOINT | FINAL_REVIEW | CLOSURE_REVIEW | PROCESS_REVIEW
+  complete: true                    # complete review of the candidate; false for a targeted closure
+  reviewer: <agent>                 # must differ from author
+  author: <agent>
+  candidate: {code: <40-hex>, docs: <40-hex>}   # at least one side; any side name the project uses
+  gate_tier_verified: G3            # G0 | G1 | G2 | G3 | none -- what the reviewer re-ran
+  class_confirmation: {kind: <kind>, class: <governing | mechanical>, rule: <CP-n>, outcome: CONFIRMED | CORRECTED}
+  verdict: APPROVED | CHANGES_REQUESTED | HANDOFF_BLOCKED
+  new_evidence: true                # did this round add a witness, a finding or a matrix row (the no-new-evidence signal)
+  findings:
+    - {id: <FINDING-ID>, class: <taxonomy class or alias>, blocking: true, surface: <root-cause surface>, witness: <path>}
+  closed:
+    - {id: <FINDING-ID>, negative_control: <known-bad method>}            # or
+    - {id: <FINDING-ID>, negative_control: NOT_APPLICABLE, reason: documentary/traceability-only}
+```
+````
+
+Rules the tool enforces: `reviewer` differs from `author`; `APPROVED` carries no blocking finding;
+`HANDOFF_BLOCKED` carries no findings; every closed finding records its negative control, or
+`NOT_APPLICABLE` with the reason; `surface` names the root-cause surface so successor findings (trigger
+B) can be counted; unknown keys are errors. `CHANGES_REQUESTED` with `new_evidence: false` is a round
+without new discriminating evidence (`consequence-classes.md`, "The signal").
+
 ```text
 REVIEWER ROLE       <agent / pane>, independent of the author
 REVIEWED            code: PR #<n> @ <40-hex>   docs: PR #<n> @ <40-hex>

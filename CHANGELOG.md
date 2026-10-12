@@ -2,6 +2,32 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
+## 0.3.0 — P3a: structured review header, convergence counters, metrics, composite verbs (2026-10-12)
+
+Record §6.6; coordination `minion-agent#213` (PROC-KIT-P3, process / governing CP-6).
+
+- `templates/review-record.md`: the fenced `review:` header (schema version 1) every review record now
+  opens with; `minion-process review-check <file>` validates it offline (`minion_process/review.py`):
+  reviewer ≠ author, no blocking finding under `APPROVED`, no findings under `HANDOFF_BLOCKED`, a
+  negative control or `NOT_APPLICABLE` with reason for every closed finding, `surface` for successor
+  counting, `new_evidence` for the no-new-evidence signal; fail-closed shapes.
+- `minion-process convergence counters <issue>`: reads the headers published on the coordination issue
+  and the candidate PRs, computes triggers A (a blocking finding in two or more reviews), B (two
+  distinct blocking findings on one surface) and C (three rejected complete reviews) plus the rounds
+  without new evidence, and prints the mandatory §11.8 statement. Invalid headers are counted, never
+  silently dropped.
+- `minion-process metrics <issue> [--out file]`: the §14.6 metrics available from the state block and
+  the headers (review events, complete vs targeted, approvals, rounds without new evidence, findings by
+  class, closures with and without negative control, gate tiers verified, routes taken, Owner questions
+  routed, triggers).
+- Composite verbs (`minion_process/composite.py`): `handoff <issue> --to --action [--status] [--sha
+  side=sha]` sets owner, action and heads in one checked commit and refuses with zero writes when the
+  intended candidate would be `HANDOFF_BLOCKED`; `close <issue> --comment-file` verifies every
+  recorded candidate PR is merged at its recorded head, records the merge commits, moves to `CLOSED`
+  through every closure guard, then closes the issue. Both are built only from the existing primitives.
+- `GitHub.issue_comments` (paginated) and `GitHub.close_issue`.
+- Not yet: `dispatch`, `session start`, `cleanup`, launchers, fault-fired rule, replay suite (0.4.0).
+
 ## 0.2.0 — P2: kinds, consequence classes, routing (2026-10-12)
 
 Owner decisions 2 and 3 (`minion-agent#205`); `minion-agent#75` Amendment 2 (Owner, 2026-10-12).

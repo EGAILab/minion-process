@@ -578,8 +578,11 @@ review artifact must become part of the accepted milestone, when a convergence c
 repository content before implementation, or when repository policy requires it. Otherwise a SHA-bound
 review record attached to the coordination record or PR suffices if it contains reviewer role,
 candidate SHA(s), authority revision, scope, findings, witness links, verdict and next transition
-(`templates/review-record.md`). At certification, summarize material intermediate evidence into the
-final assurance record. Do not reduce evidence quality; reduce redundant repository objects.
+(`templates/review-record.md`). The record opens with the structured `review:` header the tool reads
+(`minion-process review-check`); the published headers are what `convergence counters` and `metrics`
+compute from, so a verdict that is not published with its header is invisible to them. At
+certification, summarize material intermediate evidence into the final assurance record. Do not reduce
+evidence quality; reduce redundant repository objects.
 
 ### 11.3 Exact-SHA review invariant
 
@@ -685,7 +688,9 @@ reopen certified semantics or change the taxonomy.
 **The trigger check is mandatory, not advisory.** Before a new ordinary remediation pass, the
 remediation owner explicitly checks A, B and C against the finding's own review history, root-cause
 surface and the WP's rejected-review count, and states the result ("R003 has survived one independent
-review, so A has not fired; …"). Being at two surviving reviews is A fired, not "approaching". If a
+review, so A has not fired; …"). `minion-process convergence counters <issue>` computes the three
+counters from the published review headers and prints this statement; the owner records it and adds
+what the headers cannot know. Being at two surviving reviews is A fired, not "approaching". If a
 trigger is met, convergence is the default; another point-fix pass requires stating why. Do not weaken
 the thresholds (`lessons/L08-TRIGGER-CHECK.md`). Where routing is delegated (`routing.md` RT-6), a fired
 trigger is recorded with its counters and **notified to the Owner with the default route**; the
@@ -884,7 +889,10 @@ WP-B. Each state records its dependency edges (`dependencies`: `blocked_by`, `in
 Deterministic workflow mechanics use `minion-process` (`design/minion-process-cli-design.md`) instead
 of per-agent scripts: state validation; the §11.1.1 commit round-trip (`apply`); transition legality;
 handoff validation; exact-head merge with post-merge containment; byte-verified history comments;
-profile validation. The tool decides only mechanical legality. It never decides semantics, never
+profile and review-record validation; the composite `handoff` (owner, action and heads in one checked
+commit, refused when the hand-off would be blocked) and `close` (every candidate's merge verified and
+recorded, then the issue closed); `convergence counters` and `metrics` from the published review
+headers. The tool decides only mechanical legality. It never decides semantics, never
 records a verdict on its own, and never approves. Every close, merge and comment is gated on the tool's
 exit status.
 
@@ -1057,7 +1065,8 @@ complete review → adjacent edge → repeat*.
 
 ### 14.6 Process metrics
 
-Record per work package, in its closure record (`templates/closure-record.md`): review events to
+Record per work package, in its closure record (`templates/closure-record.md`), starting from the
+output of `minion-process metrics <issue>`: review events to
 contract approval; complete vs targeted reviews; rounds without new discriminating evidence;
 post-contract semantic discoveries; lower-layer deltas discovered after implementation started; Owner
 escalations (routing / semantic / risk); documentary/status-only PRs; full-suite (G3) runs; findings

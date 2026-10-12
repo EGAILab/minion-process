@@ -40,6 +40,11 @@ CHANGELOG.md                        kit versions; a consumer pins one in its pro
 
 ```sh
 python -m minion_process profile validate path/to/profile.yaml
+python -m minion_process review-check path/to/review-record.md
+python -m minion_process --repo OWNER/REPO handoff <issue> --to Codex --action "review ..." --status CONTRACT_REVIEW --sha code=<40-hex>
+python -m minion_process --repo OWNER/REPO close <issue> --comment-file closure.md
+python -m minion_process --repo OWNER/REPO convergence counters <issue>
+python -m minion_process --repo OWNER/REPO metrics <issue> [--out assurance/metrics/<wp>.yaml]
 python -m minion_process --repo OWNER/REPO status <issue>
 python -m minion_process --repo OWNER/REPO validate <issue>
 python -m minion_process transition-check CONTRACT_CONVERGENCE FINAL_CONTRACT_REVIEW
@@ -73,7 +78,9 @@ ruff check . && mypy minion_process
 
 ## Status
 
-Version 0.2.0 (P2) adds work-package kinds and consequence classes (`consequence-classes.md`), the
+Version 0.3.0 (P3a) adds the structured review-record header with `review-check`, `convergence
+counters` and `metrics` computed from published headers, and the composite `handoff` and `close` verbs.
+Version 0.2.0 (P2) added work-package kinds and consequence classes (`consequence-classes.md`), the
 delegated routing table (`routing.md`) and their state-schema fields and `apply` guards
 (`coordination-state.md` §14). Version 0.1.0 was the P1 seed: the text of every rule of Minion-Agent's `agent-workflow.md` at
 `minion-agent-docs` `dd9fd15` is preserved, either in `WORKFLOW.md` or verbatim in a `lessons/` record

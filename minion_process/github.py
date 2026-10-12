@@ -105,6 +105,24 @@ class GitHub:
     def comment_body(self, repo: str, comment_id: str) -> str:
         return self._run(["api", f"repos/{repo}/issues/comments/{comment_id}", "--jq", ".body"], None)
 
+    def issue_comments(self, repo: str, number: int) -> list[str]:
+        """Every comment body on an issue or PR, oldest first (PR conversation comments are issue
+        comments). Paginated and slurped so the pages come back as one JSON array of arrays."""
+        out = self._run(["api", "--paginate", "--slurp", f"repos/{repo}/issues/{number}/comments"], None)
+        pages = json.loads(out) if out.strip() else []
+        bodies: list[str] = []
+        for page in pages:
+            for comment in page:
+                body = comment.get("body")
+                if isinstance(body, str):
+                    bodies.append(body)
+        return bodies
+
+    def close_issue(self, repo: str, number: int, comment: str) -> None:
+        self._run(
+            ["issue", "close", str(number), "-R", repo, "--reason", "completed", "--comment", comment], None
+        )
+
 
 def same_text(a: str, b: str) -> bool:
     """Equal as one multiline document, ignoring CRLF/BOM and trailing newlines."""
