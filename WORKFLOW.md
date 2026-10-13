@@ -438,6 +438,8 @@ Windows bind mount lacks the POSIX semantics some fixtures need. Check free spac
 a gate failure caused by a full disk is environmental: free space, re-run, disclose. Delete only scratch
 you created; anything else needs the Owner.
 
+**Shared build caches do not trust mtime freshness across checkouts.** A build tool whose artifact hash omits the checkout path and whose freshness check compares source mtimes will, for any package an older checkout has not touched, run a build made from another checkout or from a mutation control, loudly (a foreign path, a mutant's kill signature) or silently as a false pass. Every gate entry point therefore first gives the workspace-member sources a fresh mtime (a fresh worktree or copy, a copy without mtime preservation, or a contained content-neutral touch); mutation controls build only in their own cache, never a gate cache; each shared cache has one writing agent, and an independent reviewer reruns in a reviewer-only cache built from its own fresh checkout; when provenance is in doubt, the paths and build times embedded in the binaries are checked against the checkout (`lessons/SHARED-BUILD-CACHE-FRESHNESS-2026-10-13.md`).
+
 **Containment.** Scripts, probes, tests and controls that write, rename or delete paths computed at
 runtime create their sandbox strictly inside a project root, assert containment (lexical resolution,
 then the real path through links) on every target before every destructive or writing operation

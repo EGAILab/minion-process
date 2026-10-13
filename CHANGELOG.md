@@ -2,6 +2,17 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
+## 0.3.1 - lesson: shared build caches and mtime freshness (unreleased)
+
+Mechanical (CP-0) kit change from `EGAILab/minion-process#4`, proposed by the Minion-Agent consumer.
+
+- `lessons/SHARED-BUILD-CACHE-FRESHNESS-2026-10-13.md`: a shared Cargo target executed another checkout's
+  and a mutation control's binaries as a gate (`minion-agent#215`); the mechanism (path-independent
+  artifact hashes plus mtime freshness) and the rule adopted in `minion-agent#209`.
+- `WORKFLOW.md` §9.8: one paragraph: fresh sources before every gate, a separate cache for mutation
+  controls, one writer per shared cache with the reviewer in a reviewer-only cache, provenance by embedded
+  paths and build times. The replay recipe is recorded in the lesson for the consumer's gate suite.
+
 ## 0.3.0 — P3a: structured review header, convergence counters, metrics, composite verbs (2026-10-12)
 
 Record §6.6; coordination `minion-agent#213` (PROC-KIT-P3, process / governing CP-6).
@@ -51,6 +62,7 @@ Record §6.6; coordination `minion-agent#213` (PROC-KIT-P3, process / governing 
   is silently truncated; a parser failure (including the interpreter's recursion limit) makes the whole
   comment `unread`, reported by id, and the statement and metrics INCOMPLETE.
 - Not yet: `dispatch`, `session start`, `cleanup`, launchers, fault-fired rule, replay suite (0.4.0).
+
 
 ## 0.2.0 — P2: kinds, consequence classes, routing (2026-10-12)
 
