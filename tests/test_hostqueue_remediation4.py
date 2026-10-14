@@ -198,24 +198,37 @@ def _nested_cancel(depth: int) -> bytes:
     )
 
 
+# The depth at which the JSON decoder gives up is a build-time property of the interpreter: Python 3.12
+# on Windows raises at 5000 levels, while the Linux CI build decodes 5000 and raises well before 100000.
+# Codex's 5000 row is kept with the property that matters on every platform: it is rejected alone and the
+# next request is served. DEEP is beyond every supported interpreter's limit.
+DEEP = 100_000
+
+
 @pytest.mark.parametrize(
-    ("depth", "reason"), [(4, "malformed request"), (2000, "malformed request"), (5000, "unreadable request")]
+    ("depth", "reasons"),
+    [
+        (4, ("malformed request",)),
+        (2000, ("malformed request",)),
+        (5000, ("malformed request", "unreadable request")),
+        (DEEP, ("unreadable request",)),
+    ],
 )
 def test_w110_deep_nesting_is_rejected_alone_and_service_continues(
-    tmp_path: Path, depth: int, reason: str
+    tmp_path: Path, depth: int, reasons: tuple[str, ...]
 ) -> None:
     w = make_world(tmp_path)
     (w.queue / "inbox" / "000-bad.req").write_bytes(_nested_cancel(depth))
     (w.queue / "inbox" / "999-good.req").write_bytes(encode({"type": "status", "request_id": "999-good"}))
     w.broker.step()
     assert not (w.queue / "inbox" / "000-bad.req").exists()
-    assert (w.queue / "rejected" / "000-bad.reason").read_text(encoding="utf-8").startswith(reason)
+    assert (w.queue / "rejected" / "000-bad.reason").read_text(encoding="utf-8").startswith(reasons)
     assert decode_single((w.queue / "outbox" / "999-good.res").read_bytes())["ok"] is True
 
 
 def test_w110_framing_reports_deep_nesting_as_a_framing_error() -> None:
     with pytest.raises(framing.FramingError, match="too deep"):
-        decode_single(_nested_cancel(5000))
+        decode_single(_nested_cancel(DEEP))
 
 
 def test_c27_control_without_loader_containment_wedges_the_inbox(
@@ -228,7 +241,7 @@ def test_c27_control_without_loader_containment_wedges_the_inbox(
 
     monkeypatch.setattr(broker_mod, "decode_single", uncontained)
     w = make_world(tmp_path)
-    (w.queue / "inbox" / "000-bad.req").write_bytes(_nested_cancel(5000))
+    (w.queue / "inbox" / "000-bad.req").write_bytes(_nested_cancel(DEEP))
     (w.queue / "inbox" / "999-good.req").write_bytes(encode({"type": "status", "request_id": "999-good"}))
     with pytest.raises(RecursionError):
         w.broker.step()
