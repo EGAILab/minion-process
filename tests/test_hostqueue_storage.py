@@ -226,7 +226,8 @@ def test_walk_never_follows_a_link(tmp_path: Path) -> None:
     (outside / "precious.txt").write_text("keep")
     _make_dir_link(root / "j", outside)  # a nested outward junction
     found = {e.path.relative_to(root).as_posix(): e for e in walk.entries(root)}
-    assert "j/precious.txt" not in found and found["j"].is_link and found["j"].link_is_dir
+    assert "j/precious.txt" not in found and found["j"].is_link
+    assert found["j"].link_is_dir is (os.name == "nt")  # the directory attribute exists only on Windows
     assert list(found).index("d") < list(found).index("d/f.txt")
     assert [p.name for p in walk.files(root)] == ["f.txt"]
 
