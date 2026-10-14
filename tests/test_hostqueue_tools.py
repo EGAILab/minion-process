@@ -379,6 +379,7 @@ def test_build_client_verbs(
                 "w1:p1",
                 "--session",
                 "s1",
+                "--apply",
             ]
         )
         == 1
@@ -386,6 +387,7 @@ def test_build_client_verbs(
     monkeypatch.setattr(client, "wait_job", lambda queue, job, timeout: (3, {"status": "uncertain"}))
     assert main([*base, "wait", "--queue", str(w.queue), "--job", "1"]) == 3
     assert [r["type"] for r in sent][:3] == ["submit", "submit", "status"]
+    assert next(r for r in sent if r.get("class") == "cleanup")["apply"] is True
 
     def unavailable(*a: Any, **k: Any) -> dict[str, Any]:
         raise client.Unavailable("down")

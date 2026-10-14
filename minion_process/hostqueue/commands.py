@@ -9,7 +9,7 @@
     minion-process build release --queue Q --job N
     minion-process build policy --queue Q --file policy.yaml --decision <link>
     minion-process build repair --queue Q inspect|quarantine|resume
-    minion-process build cleanup --profile P --copies C1,C2 --pane P --session S
+    minion-process build cleanup --profile P --copies C1,C2 --pane P --session S [--apply]
     minion-process session start --profile P --agent A [--out report.yaml]
     minion-process faults check <matrix.yaml>
     minion-process dispatch <issue> --queue Q --pane P --session S [--mark-undelivered HASH:ATTEMPT]
@@ -79,6 +79,7 @@ def add_parsers(sub: Any) -> None:
     cleanup.add_argument("--copies", required=True)
     cleanup.add_argument("--pane", required=True)
     cleanup.add_argument("--session", required=True)
+    cleanup.add_argument("--apply", action="store_true", help="remove; without it the cleanup is a dry run")
     session = sub.add_parser("session")
     session.add_argument("action", choices=["start"])
     session.add_argument("--profile", required=True)
@@ -152,6 +153,7 @@ def run_build(args: Any, host_factory: Any = None, git_factory: Any = None) -> i
                 "class": "cleanup",
                 "profile": str(Path(args.profile).resolve()),
                 "copies": args.copies.split(","),
+                "apply": bool(args.apply),
                 "submitter": {"pane": args.pane, "session": args.session},
             },
             30.0,
