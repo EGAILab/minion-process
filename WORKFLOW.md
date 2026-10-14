@@ -429,15 +429,17 @@ gate batch or container build runs concurrently. A result produced under concurr
 isolation, not credited, pass or fail alike, and the evidence record says so.
 
 **The host build queue owns the host's build windows** (kit 0.4.0, `docs/p3b/`). A project that names
-`build_queue` in its profile runs every native gate, build, control and cleanup through
+`build_queue` in its profile runs every native gate, build and control through
 `minion-process build`, and no agent grants or holds windows. One broker per host is the only writer of
 queue state, with the single instance enforced by an OS mutex. It admits jobs by class:
 - **evidence** runs alone on the host, from a fresh copy of the exact commit;
-- **build** and **control** share the host up to the policy limit, above an exact-byte memory floor;
-- **cleanup** removes only registered copies, under an exclusive lease.
+- **build** and **control** share the host up to the policy limit, above an exact-byte memory floor.
 
-Only an evidence job that passed and whose copy stayed at the exact commit and clean is `eligible`. Build,
-control and cleanup results are never evidence, whatever their exit code. A job's resources are released
+Every job runs in a working folder it alone leases. A launcher names its paths only through declared
+slots, and every writable directory resource is proved free of links before the job starts. Execution
+copies stay registered and are never reused; the kit never deletes them, and the Owner removes them by
+hand. Only an evidence job that passed and whose copy stayed at the exact commit and clean is `eligible`.
+Build and control results are never evidence, whatever their exit code. A job's resources are released
 only on proof that its workload ended; otherwise the job is `uncertain` and holds them. The queue never
 kills, stops or signals a process, and never sends keys to a pane. Policy changes, releases and repairs
 need the Owner's `CONFIRM QUEUE <code>` in a Claude session, a procedural channel stated as such.
@@ -959,7 +961,7 @@ untracked work; never reset or overwrite unrelated work to match an old instruct
 progress from chat history, stale handoff text or local-only commits when the remote says otherwise.
 `minion-process session start --profile <profile> --agent <agent>` does this and writes nothing but Git
 metadata and its report. Its report also covers the queue's running, waiting and uncertain jobs, the
-cleanup candidates and the work packages the agent may progress. A partial report is never a green
+registered copies and the work packages the agent may progress. A partial report is never a green
 prerequisite.
 
 ### 12.3 Commit and push every completed pass

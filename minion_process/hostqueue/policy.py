@@ -9,6 +9,7 @@ re-confirms a policy.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +20,7 @@ OWNER_DEFAULTS = {  # Owner decision 2026-10-13 (#223 issuecomment-6139069723)
     "bypass_limit": 3,
 }
 
+_POLICY_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)*")
 _INT_FIELDS = ("version", "limit", "floor_bytes", "reservation_seconds", "bypass_limit")
 
 
@@ -60,8 +62,9 @@ def parse(data: Any) -> Policy:
             raise PolicyError(f"policy {key} must be a non-negative integer")
     if data["version"] < 1 or data["limit"] < 1:
         raise PolicyError("policy version and limit must be at least 1")
-    if not isinstance(data["policy_id"], str) or not data["policy_id"]:
-        raise PolicyError("policy_id must be a non-empty string")
+    if not isinstance(data["policy_id"], str) or not _POLICY_ID.fullmatch(data["policy_id"]):
+        # It becomes part of folder names, group names and job labels (K-42): letters, digits, `.`, `_`, `-`.
+        raise PolicyError("policy_id must be a name of letters, digits, '.', '_' or '-'")
     projects = data["projects"]
     if not isinstance(projects, dict) or not projects:
         raise PolicyError("policy projects must be a non-empty mapping")

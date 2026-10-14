@@ -1,14 +1,21 @@
-"""Request shapes, checked before dispatch (PROC-KIT-P3B-R010).
+"""Request shapes, checked before dispatch (K-44, PROC-KIT-P3B-R010).
 
-A well-framed request whose fields have the wrong shape is rejected on its own, into `rejected/` with the
-reason. It never raises inside the broker, never stalls the inbox, and never reaches a handler. Only field
-shapes are checked here. Every semantic decision (does the job exist, is the copy registered, is the
-policy valid) stays with the handler. Storage, workload and containment errors are not swallowed as
-malformed input.
+`malformed` is total over JSON values: for any decoded value it returns None (well formed) or the reason,
+and it never raises. It checks, in this order:
+
+1. the top level is an object;
+2. the discriminator `type` is present and a string;
+3. every field the handler for that type reads has the kind the handler expects, including nested fields.
+
+A malformed request is moved to `rejected/` with its reason. No handler runs. A string `type` the broker
+does not know is not malformed: the dispatcher answers it with an ordinary refusal. Only field kinds are
+checked here. Every semantic decision (does the job exist, is the policy valid) stays with the handler,
+and a fault raised outside this function is a broker fault, never counted as malformed input.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 
@@ -18,6 +25,10 @@ def _text(value: Any) -> bool:
 
 def _int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _optional_string(r: dict[str, Any], key: str) -> str | None:
+    return None if r.get(key) is None or isinstance(r[key], str) else f"{key} must be a string"
 
 
 def _submitter(value: Any) -> str | None:
@@ -30,20 +41,14 @@ def _submitter(value: Any) -> str | None:
 
 
 def _check_submit(r: dict[str, Any]) -> str | None:
-    if not _text(r.get("class")):
-        return "class must be a non-empty string"
-    if not _text(r.get("profile")):
-        return "profile must be a non-empty string"
+    for key in ("class", "profile"):
+        if not _text(r.get(key)):
+            return f"{key} must be a non-empty string"
     problem = _submitter(r.get("submitter"))
     if problem:
         return problem
     if r["class"] == "cleanup":
-        copies = r.get("copies")
-        if not isinstance(copies, list) or not all(_text(c) for c in copies):
-            return "copies must be a list of non-empty strings"
-        if "apply" in r and not isinstance(r["apply"], bool):
-            return "apply must be true or false"
-        return None
+        return None  # refused by the handler as unsupported in 0.4.0 (K-47); no other field is read
     for key in ("launcher", "target", "checkout"):
         if not _text(r.get(key)):
             return f"{key} must be a non-empty string"
@@ -73,10 +78,7 @@ def _check_policy(r: dict[str, Any]) -> str | None:
 def _check_render(r: dict[str, Any]) -> str | None:
     if not isinstance(r.get("text"), str):
         return "text must be a string"
-    for key in ("pane", "session"):
-        if key in r and r[key] is not None and not isinstance(r[key], str):
-            return f"{key} must be a string"
-    return None
+    return _optional_string(r, "pane") or _optional_string(r, "session")
 
 
 def _check_undelivered(r: dict[str, Any]) -> str | None:
@@ -84,24 +86,20 @@ def _check_undelivered(r: dict[str, Any]) -> str | None:
         return "hash must be a non-empty string"
     if not _int(r.get("attempt")):
         return "attempt must be a non-negative integer"
-    return (
-        None
-        if "session" not in r or r["session"] is None or isinstance(r["session"], str)
-        else "session must be a string"
-    )
+    return _optional_string(r, "session")
 
 
 def _check_confirm(r: dict[str, Any]) -> str | None:
     if not isinstance(r.get("code"), str):
         return "code must be a string"
-    return None if r.get("session") is None or isinstance(r["session"], str) else "session must be a string"
+    return _optional_string(r, "origin") or _optional_string(r, "session")
 
 
 def _none(r: dict[str, Any]) -> str | None:
     return None
 
 
-CHECKS = {
+CHECKS: dict[str, Callable[[dict[str, Any]], str | None]] = {
     "submit": _check_submit,
     "status": _check_status,
     "cancel": _check_job_and_submitter,
@@ -117,8 +115,16 @@ CHECKS = {
 }
 
 
-def malformed(request: dict[str, Any]) -> str | None:
-    """The reason a request is malformed, or None. An unknown type is not malformed: the handler answers
-    it with an ordinary refusal."""
-    check = CHECKS.get(request.get("type"))  # type: ignore[arg-type]
+def malformed(request: Any) -> str | None:
+    """The reason a decoded request is malformed, or None (K-44)."""
+    if not isinstance(request, dict):
+        return f"a request must be an object, got {type(request).__name__}"
+    if "type" not in request:
+        return "type is missing"
+    kind = request["type"]
+    if not isinstance(kind, str):
+        return f"type must be a string, got {type(kind).__name__}"
+    if not isinstance(request.get("request_id"), str):
+        return "request_id must be a string"
+    check = CHECKS.get(kind)
     return check(request) if check else None

@@ -2,12 +2,14 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
-## 0.4.0 — P3b: host build queue, session start, cleanup, dispatch rendering, fault-fired check (2026-10-14)
+## 0.4.0 — P3b: host build queue, session start, dispatch rendering, fault-fired check (2026-10-14)
 
-Coordination `minion-agent#223` (PROC-KIT-P3B, process / governing, `CP-1`, `CP-5`, `CP-6`). Contract agreed
-in convergence episode `CE-PROC-P3B-01` (Codex round 6); texts in `docs/p3b/`. Owner decisions: window
-ownership moves to a host queue (`minion-agent#209` issuecomment-6138907446); the queue folder; 2 jobs /
-16 GiB / 3 minutes (`#223`); `CONFIRM QUEUE` through the Claude chat hook (`#223`).
+Coordination `minion-agent#223` (PROC-KIT-P3B, process / governing, `CP-1`, `CP-5`, `CP-6`). Contract
+from convergence episode `CE-PROC-P3B-01`: agreed in Codex round 6, invalidated under §11.8.10 after round
+8, and agreed again at checkpoint revision 15 (Codex round 16). The texts and their precedence are in
+`docs/p3b/README.md`. Owner decisions: window ownership moves to a host queue (`minion-agent#209`
+issuecomment-6138907446); the queue folder; 2 jobs / 16 GiB / 3 minutes (`#223`); `CONFIRM QUEUE` through
+the Claude chat hook (`#223`); no cleanup class in 0.4.0 (`#223` issuecomment-6164469910).
 
 - `minion_process/hostqueue/`:
   - **Broker:** single instance via the OS mutex. It replays the journal on every start. Clients write one
@@ -28,12 +30,14 @@ ownership moves to a host queue (`minion-agent#209` issuecomment-6138907446); th
     hook).
   - **Repair mode:** never admits. Quarantine keeps the original bytes. Placeholders hold the host for
     effects whose footprint is unknown.
-  - **Cleanup class:** removes registered copies only, under a lease handed from the creator job, and
-    checks the reference set at the destructive boundary. No walk ever follows a link or junction.
-  - **Containment:** proved before every write, rename and delete.
+  - **Registered copies:** each execution copy stays registered under its creator for good. Its lease
+    is released with the creator's proven or confirmed end, to no other job, and it is never reused.
+    Removal is manual; there is no cleanup class (K-46 to K-48″). No walk ever follows a link or junction.
+  - **Containment:** proved before every write, rename and delete. The broker deletes and renames only
+    inside its queue folder.
   - **`winos.py`:** the Windows host adapter (named mutex, process identity, job objects, memory, volume
     type, write-through rename, docker and herdr queries).
-- `minion-process build broker|submit|status|wait|cancel|unretain|release|policy|repair|cleanup`,
+- `minion-process build broker|submit|status|wait|cancel|unretain|release|policy|repair`,
   `session start`, `faults check`, `dispatch --print` / `--mark-undelivered`.
 - `minion_process/faults.py`: fault-fired accounting for feasibility matrices and control recipes.
 - Profile: optional `build_queue` and per-gate `queue` (schema and validator, differential tests).
@@ -46,13 +50,33 @@ ownership moves to a host queue (`minion-agent#209` issuecomment-6138907446); th
   - **R003:** the effective environment is frozen and bound to leased resources: `inherit_env`, `caches`,
     `cache_env`, and a per-job temporary folder. Controls require a controls-kind target.
   - **R005:** a retry grant stands only with its readable marker.
-  - **R006:** cleanup is a dry run by default. Apply re-checks the full Part C conjunction before every
-    batch, with a declared reference set, and submissions naming a cleaned resource are refused.
+  - **R006:** superseded. The Owner withdrew cleanup from 0.4.0 (below).
   - **R008:** challenges are bound to the boot.
   - **R009:** containment proves the root and its ancestors, and every mutation goes through `fsops`.
   - **R010:** request shapes are validated per type, and a malformed request is rejected alone.
   - **Packaging:** subpackages are included, with a wheel smoke check in CI.
-- Not in 0.4.0: automatic pane sending (deferred, K-4); the incident replay suite (P4).
+- Implementation revision 3 (checkpoint revision 15 rule set, after the §11.8.10 invalidation):
+  - **K-41 (R002):** process observations are three-valued. An unknown birth time stays unknown for the
+    life of the identity and is never coerced to a number. An identity with an unknown birth is
+    alive-or-unknown until its process id no longer exists.
+  - **K-42 (R003):** launcher paths reach a tool only through declared slots
+    (`{slot: <template>, access: read|write}`). Every other argv element and env value is a literal with
+    no separator, drive, `..` or control character. Writable-location variables are set only by the kit,
+    and names compare case-insensitively. A leased path spelled with `=`, `;`, a quote or a control
+    character is refused. Every job runs in a working folder it leases exclusively; a build gets a fresh
+    one and reaches its checkout through `{checkout}`, which is read only. Before spawning, every writable
+    directory resource (working folder, target, caches, temporary folder, log directory) passes an
+    ancestor proof and a complete no-follow walk, and its walk time is recorded.
+  - **K-44 (R010):** request validation is total over JSON values: the top level, then the `type`
+    discriminator, then each field a handler reads.
+  - **K-46 to K-48″ (R006 withdrawn, R011):** a cleanup submission is refused, and the `build cleanup`
+    verb, `cleanup_references`, the cleanup markers and the cleanup code are removed. `build status` and
+    `session start` list registered copies as `held`, `released`, `released (human-confirmed)` or
+    `damaged`, with `, absent` after a manual removal. A human-confirmed release is restored on recovery
+    only from an intact record and never counts as workload-ended proof. An ambiguous one is not restored.
+  - **K-45:** generated witness matrices and executed controls in `tests/test_hostqueue_remediation2.py`.
+- Not in 0.4.0: a cleanup class (Owner decision, `#223`); automatic pane sending (deferred, K-4); the
+  incident replay suite (P4).
 
 ## 0.3.1 — lesson: shared build caches and mtime freshness (2026-10-13)
 

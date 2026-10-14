@@ -3,7 +3,6 @@ broker on the fake host, and a confirmed initial policy."""
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -129,18 +128,18 @@ def make_world(tmp: Path, with_policy: bool = True) -> World:
                             "owner_agent": "claude",
                         },
                     },
-                    "cleanup_references": {
-                        "work_packages": [sys.executable, "-c", "print('no open work packages')"],
-                        "incidents": [str(root / "incidents")],
-                        "authority_cache": [str(root / "authority")],
-                    },
                 },
                 "gates": {
                     "rust": {
                         "launcher": "cargo test",
                         "tiers": ["g3"],
                         "queue": {
-                            "argv": ["cargo", "test", "--manifest-path", "{checkout}"],
+                            "argv": [
+                                "cargo",
+                                "test",
+                                "--manifest-path",
+                                {"slot": "{checkout}", "access": "read"},
+                            ],
                             "target_env": ["CARGO_TARGET_DIR"],
                             "source_globs": ["src/*.rs", "Cargo.toml"],
                         },

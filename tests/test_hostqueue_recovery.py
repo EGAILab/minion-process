@@ -161,9 +161,18 @@ def test_c15_c16_the_rejected_rules_would_launch_twice(
 
     monkeypatch.setattr(markers_mod.Markers, "names", names)
     monkeypatch.setattr(markers_mod.Markers, "publish", publish)
+    _drop_working_folder(w, job_id)
     restart(w)
     w.broker.step()
     assert len(w.host.spawned) == 2  # the hazard the agreed rules prevent
+
+
+def _drop_working_folder(w: Any, job_id: int) -> None:
+    """K-42's fresh working folder refuses a second preparation on its own. These controls isolate the
+    journal and marker rules they substitute, so the test removes that folder (inside its sandbox)."""
+    import shutil
+
+    shutil.rmtree(w.job(job_id).spec["workdir"])
 
 
 def test_c14_discarding_short_tails_would_relaunch_a_live_job(
@@ -182,6 +191,7 @@ def test_c14_discarding_short_tails_would_relaunch_a_live_job(
     )
     monkeypatch.setattr(markers_mod.Markers, "publish", lambda *a, **k: None)
     w.host.groups[w.job(job_id).spec["group"]] = False  # an inspection that does not see the live work
+    _drop_working_folder(w, job_id)
     restart(w)
     w.broker.step()
     assert len(w.host.spawned) == 2
@@ -443,6 +453,7 @@ def test_marker_folder_unreadable_during_reconciliation(tmp_path: Path) -> None:
 
 def test_intact_journal_with_markers_ahead_records_the_recovery(tmp_path: Path) -> None:
     w = make_world(tmp_path)
+    w.submit()  # job 1: a registration names a known job
     w.broker.markers.publish(
         "register", ("loose",), {"path": str(w.root / "exec" / "loose"), "job_id": 1, "manifest": []}, 0
     )
@@ -457,7 +468,7 @@ def test_unreadable_register_marker(tmp_path: Path) -> None:
     path = w.queue / "effects" / "register" / "bad"
     path.write_bytes(b"junk")
     report = restart(w)
-    assert report.mode == "repair" and any("copy damaged" in line for line in report.recovery)
+    assert report.mode == "repair" and any("not in the journal" in line for line in report.recovery)
 
 
 assert SHA

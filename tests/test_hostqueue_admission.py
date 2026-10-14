@@ -187,15 +187,6 @@ def test_w50_unknown_extent_blocks_every_class() -> None:
     assert d.admit is None and "blocked" in d.waits[b]
 
 
-def test_cleanup_counts_and_never_runs_with_evidence() -> None:
-    q = Q()
-    c = q.job("cleanup", [["X", "exclusive"]])
-    ev = q.job("evidence", [["Y", "exclusive"]])
-    q.run(c)
-    assert decide(q.state, policy(), 64 * GIB, 1000.0).admit is None
-    del ev
-
-
 def test_modes_and_missing_policy_stop_admission() -> None:
     q = Q()
     b = q.job("build")
@@ -224,7 +215,7 @@ def test_invariants_refuse_contradictions() -> None:
     with pytest.raises(InvariantError, match="decided twice"):
         q.rec("reject", request_id="bad", reason="x")
     with pytest.raises(InvariantError, match="unknown copy"):
-        q.rec("copy-state", copy_id="c", state="removed")
+        q.rec("copy-damaged", copy_id="c", reason="x")
     with pytest.raises(InvariantError, match="closed or unknown challenge"):
         q.rec("confirmed", challenge_id="nope")
     with pytest.raises(InvariantError, match="render attempt"):
@@ -269,8 +260,7 @@ def test_state_transitions_cover_every_record_kind() -> None:
     assert q.state.policy_version is None and q.state.policy_floor == 4
     q.rec("policy", version=5, challenge="c3")
     q.rec("register", copy_id="cp", path="P", job_id=k)
-    q.rec("lease-transfer", copy_id="cp", to_job=r)
-    q.rec("copy-state", copy_id="cp", state="removed")
+    q.rec("copy-damaged", copy_id="cp", reason="manifest entry x is missing")
     q.rec("undelivered", hash="h", attempt=1)
     q.rec("recovery", outcomes=[])
     assert q.state.copies["cp"]["creator"] == k
@@ -302,4 +292,4 @@ def test_build_lease_drops_to_shared_after_preparation() -> None:
     assert ("CHK", "shared") in q.state.held_leases() and ("T", "exclusive") in q.state.held_leases()
 
 
-assert state_mod.CLASSES == ("evidence", "build", "control", "cleanup")
+assert state_mod.CLASSES == ("evidence", "build", "control")

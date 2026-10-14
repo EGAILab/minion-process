@@ -32,7 +32,18 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
-from .hostos import MutexResult, ProcessIdentity, Spawned, SpawnFailed
+from .hostos import (
+    EXITED,
+    NO_SUCH_ID,
+    OPEN_FAILS,
+    QUERY_FAILS,
+    STILL_ACTIVE,
+    MutexResult,
+    ProcessIdentity,
+    Spawned,
+    SpawnFailed,
+    liveness,
+)
 
 MUTEX_NAME = "Global\\MinionProcessHostQueue"
 WAIT_OBJECT_0 = 0x00000000
@@ -43,7 +54,7 @@ ERROR_INVALID_HANDLE = 6
 ERROR_FILE_EXISTS = 80
 ERROR_ALREADY_EXISTS = 183
 ERROR_FILE_NOT_FOUND = 2
-STILL_ACTIVE = 259
+STILL_ACTIVE_CODE = 259
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_SET_QUOTA = 0x0100
 PROCESS_TERMINATE_NOT_USED = 0  # the broker never requests terminate rights
@@ -181,24 +192,22 @@ class WindowsHostOS:
     def self_identity(self) -> ProcessIdentity:
         import os
 
-        start = self._times(self.k32.GetCurrentProcess())
-        return ProcessIdentity(os.getpid(), start or 0)
+        return ProcessIdentity(os.getpid(), self._times(self.k32.GetCurrentProcess()))
 
     def process_alive(self, ident: ProcessIdentity) -> bool | None:
+        """K-41: observe each step as answered or failed, then decide with `hostos.liveness`."""
         handle = self.k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, ident.pid)
         if not handle:
-            error = ctypes.get_last_error()
-            return False if error == 87 else None  # ERROR_INVALID_PARAMETER: no such process id
+            error = ctypes.get_last_error()  # ERROR_INVALID_PARAMETER (87): no such process id
+            return liveness(ident.start, NO_SUCH_ID if error == 87 else OPEN_FAILS, QUERY_FAILS, QUERY_FAILS)
         try:
             start = self._times(handle)
-            if start is None:
-                return None
-            if start != ident.start:
-                return False  # the id was reused by another process
             code = wintypes.DWORD()
             if not self.k32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return None
-            return code.value == STILL_ACTIVE
+                exit_state = QUERY_FAILS
+            else:
+                exit_state = STILL_ACTIVE if code.value == STILL_ACTIVE_CODE else EXITED
+            return liveness(ident.start, "opened", QUERY_FAILS if start is None else start, exit_state)
         finally:
             self.k32.CloseHandle(handle)
 
@@ -220,7 +229,7 @@ class WindowsHostOS:
             creationflags=CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP,
         )
         handle = int(process._handle)  # type: ignore[attr-defined]
-        ident = ProcessIdentity(process.pid, self._times(handle) or 0)
+        ident = ProcessIdentity(process.pid, self._times(handle))  # None stays unknown for life (K-41)
         if not self.k32.AssignProcessToJobObject(job, handle):
             raise SpawnFailed(f"AssignProcessToJobObject failed: {ctypes.get_last_error()}", ident)
         status = self.ntdll.NtResumeProcess(handle)

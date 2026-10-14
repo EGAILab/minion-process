@@ -366,28 +366,11 @@ def test_build_client_verbs(
     )
     assert main([*base, "policy", "--queue", str(w.queue), "--file", str(policy), "--decision", "link"]) == 0
     assert main([*base, "repair", "--queue", str(w.queue), "inspect"]) == 0
-    assert (
-        main(
-            [
-                *base,
-                "cleanup",
-                "--profile",
-                str(w.profile),
-                "--copies",
-                "x",
-                "--pane",
-                "w1:p1",
-                "--session",
-                "s1",
-                "--apply",
-            ]
-        )
-        == 1
-    )
+    with pytest.raises(SystemExit):  # K-47: there is no cleanup verb
+        main([*base, "cleanup", "--profile", str(w.profile), "--copies", "x", "--pane", "w1:p1"])
     monkeypatch.setattr(client, "wait_job", lambda queue, job, timeout: (3, {"status": "uncertain"}))
     assert main([*base, "wait", "--queue", str(w.queue), "--job", "1"]) == 3
     assert [r["type"] for r in sent][:3] == ["submit", "submit", "status"]
-    assert next(r for r in sent if r.get("class") == "cleanup")["apply"] is True
 
     def unavailable(*a: Any, **k: Any) -> dict[str, Any]:
         raise client.Unavailable("down")
@@ -447,7 +430,7 @@ def test_w26_session_start_reports_and_writes_only_its_report(tmp_path: Path) ->
     )
 
 
-def test_session_queue_summary_and_candidates(tmp_path: Path) -> None:
+def test_session_queue_summary_and_registered_copies(tmp_path: Path) -> None:
     w = make_world(tmp_path)
     evidence = w.submit("evidence", sha="a" * 40)["job_id"]
     (w.queue / "jobs" / str(evidence) / "result").write_bytes(encode({"exit": 1, "gate_end": 1}))
@@ -455,8 +438,10 @@ def test_session_queue_summary_and_candidates(tmp_path: Path) -> None:
     w.broker.step()
     w.host.memory = 0
     w.submit()
-    summary, candidates = commands._queue_summary(w.queue)
-    assert summary["waiting"] and candidates == [str(w.job(evidence).spec["job_label"])]
+    summary, copies = commands._queue_summary(w.queue)
+    assert summary["waiting"] and [(c["copy"], c["state"]) for c in copies] == [
+        (str(w.job(evidence).spec["job_label"]), "released")
+    ]
     assert commands._queue_summary(tmp_path / "empty") == (
         {"running": [], "waiting": [], "uncertain": []},
         [],

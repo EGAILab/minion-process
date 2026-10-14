@@ -12,7 +12,7 @@ from typing import Any
 
 from .policy import Policy
 
-CLASSES = ("evidence", "build", "control", "cleanup")
+CLASSES = ("evidence", "build", "control")  # no cleanup class in 0.4.0 (K-47)
 ACTIVE = ("launching", "running", "uncertain")
 TERMINAL = ("ended", "refused", "cancelled")
 
@@ -37,6 +37,8 @@ class Job:
     reason: str | None = None
     extent_known: bool = True
     retain: bool = False
+    proof: str | None = None  # how an end was established: "inspected" (K-41) or "human-confirmed" (K-23)
+    override: dict[str, Any] | None = None  # the confirmed release that ended it: challenge and generation
 
     @property
     def klass(self) -> str:
@@ -150,6 +152,8 @@ class QueueState:
         job.eligible = bool(rec["eligible"])
         job.reason = rec.get("reason")
         job.retain = bool(rec.get("retain", False))
+        job.proof = rec.get("proof")
+        job.override = rec.get("override")
         job.reserved_since = None
 
     def _on_refused(self, rec: dict[str, Any], now: float) -> None:
@@ -202,29 +206,54 @@ class QueueState:
         self.undelivered.get(rec["hash"], set()).discard(rec["attempt"])
 
     def _on_register(self, rec: dict[str, Any], now: float) -> None:
-        self.copies[rec["copy_id"]] = {
-            "path": rec["path"],
-            "job_id": rec["job_id"],
-            "creator": rec["job_id"],
-            "state": "registered",
-        }
+        """B-12, K-48': a copy is registered under its creator for good. Its lease is the creator's own
+        exclusive lease on the path, so it is held exactly while the creator is active and released, to no
+        other job, in the transition that ends the creator. Nothing ever transfers it."""
+        if rec["job_id"] not in self.jobs:
+            raise InvariantError(f"record {rec['seq']}: copy {rec['copy_id']} of unknown job {rec['job_id']}")
+        self.copies[rec["copy_id"]] = {"path": rec["path"], "creator": rec["job_id"], "damaged": False}
 
-    def _copy(self, rec: dict[str, Any]) -> dict[str, Any]:
+    def _on_copy_damaged(self, rec: dict[str, Any], now: float) -> None:
+        """Recovery: the registration's manifest disagrees with the disk (K-39). It stays registered."""
         copy = self.copies.get(rec["copy_id"])
         if copy is None:
             raise InvariantError(f"record {rec['seq']}: unknown copy {rec['copy_id']}")
-        return copy
+        copy["damaged"] = True
+        copy["damage"] = rec["reason"]
 
-    def _on_lease_transfer(self, rec: dict[str, Any], now: float) -> None:
-        self._copy(rec)["job_id"] = rec["to_job"]
-
-    def _on_copy_state(self, rec: dict[str, Any], now: float) -> None:
-        self._copy(rec)["state"] = rec["state"]
+    def _on_override_unrestored(self, rec: dict[str, Any], now: float) -> None:
+        """Recovery, K-33 and K-48'' row 4: the record of a confirmed release is ambiguous, so its effect is
+        not restored. The job is `uncertain` again and holds its resources, its copy lease included."""
+        job = self._job(rec, "ended")
+        if job.outcome != "human-confirmed":
+            raise InvariantError(f"record {rec['seq']}: job {job.job_id} has no confirmed release")
+        job.status = "uncertain"
+        job.outcome = None
+        job.proof = None
+        job.override = None
+        job.eligible = False
+        job.reason = rec["reason"]
+        job.reserved_since = now
+        job.reservation_restored = True
 
     def _on_recovery(self, rec: dict[str, Any], now: float) -> None:
         pass  # informational: the outcomes it reports are applied by their own records
 
     # -- queries -----------------------------------------------------------------------------------------
+
+    def copy_state(self, copy_id: str) -> str:
+        """K-48'': `held` while the creator is active or unknown, `released` after an inspected end (or a
+        refusal, which never launched), `released (human-confirmed)` after a confirmed release, and
+        `damaged` when recovery found its manifest inconsistent. Every state stays registered."""
+        copy = self.copies[copy_id]
+        if copy.get("damaged"):
+            return "damaged"
+        creator = self.jobs.get(int(copy["creator"]))
+        if creator is None or creator.status not in TERMINAL:
+            return "held"
+        if creator.status == "ended" and creator.outcome == "human-confirmed":
+            return "released (human-confirmed)"
+        return "released"
 
     def active(self) -> list[Job]:
         return [j for j in self.jobs.values() if j.status in ACTIVE]

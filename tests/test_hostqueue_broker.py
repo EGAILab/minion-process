@@ -186,7 +186,7 @@ def _edit_profile(w: World, edit: Any) -> None:
         (lambda d: d["gates"]["rust"]["queue"].update(argv=[]), "non-empty list"),
         (lambda d: d["build_queue"]["targets"]["gate"].update(kind="odd"), "target kind"),
         (lambda d: d["gates"]["rust"]["queue"].update(source_globs=[]), "source_globs"),
-        (lambda d: d["gates"]["rust"]["queue"].update(argv=["x", "--out=C:\\Windows\\x"]), "not contained"),
+        (lambda d: d["gates"]["rust"]["queue"].update(argv=["x", "--out=C:\\Windows\\x"]), "K-42"),
     ],
 )
 def test_profile_refusals(tmp_path: Path, edit: Any, message: str) -> None:
@@ -232,7 +232,14 @@ def test_build_spec_paths_and_mount_forms(tmp_path: Path) -> None:
     _edit_profile(
         w,
         lambda d: d["gates"]["rust"]["queue"].update(
-            argv=["docker", "-v", "{target}:/t", "--env=X={log}"], env={"A": "{workdir}"}
+            argv=[
+                "docker",
+                "-v",
+                {"slot": "{target}:/t", "access": "write"},
+                {"slot": "--env={log}", "access": "write"},
+            ],
+            env={"A": {"slot": "{workdir}", "access": "write"}},
+            container={"paths": ["/t"]},
         ),
     )
     request = {
@@ -246,8 +253,9 @@ def test_build_spec_paths_and_mount_forms(tmp_path: Path) -> None:
     }
     spec = build_spec(request, w.broker.policy, "q", 5, pane_info("s1"))
     assert spec["argv"][2].endswith(":/t") and spec["env"]["A"].endswith("q-job-5")
+    assert spec["argv"][3] == "--env=" + spec["log"]
     _edit_profile(w, lambda d: d["gates"]["rust"]["queue"].update(argv=["docker", "-v", "C:\\Windows:/w"]))
-    with pytest.raises(SpecError, match="not contained"):
+    with pytest.raises(SpecError, match="K-42"):
         build_spec(request, w.broker.policy, "q", 5, pane_info("s1"))
     with pytest.raises(SpecError, match="cannot be read"):
         build_spec(request, w.broker.policy, "q", 5, None)

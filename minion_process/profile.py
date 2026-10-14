@@ -40,6 +40,7 @@ TOP_OPTIONAL = (
 AUTHORITY_KINDS = frozenset({"source", "bundle", "manifest", "spec", "conformance", "design", "register"})
 BACKENDS = frozenset({"github-issue", "state-file"})
 TARGET_KINDS = frozenset({"gate", "controls", "reviewer"})
+ACCESS = frozenset({"read", "write"})  # a declared path slot's access (K-42c)
 TAXONOMY = frozenset(
     {
         "AUTHORITY_BEHAVIOR_UNCERTAIN",
@@ -284,28 +285,50 @@ def _gate_queue(c: _Check, value: Any, path: str) -> None:
         c.error(f"{path}.argv", "needs at least 1 item(s)")
     else:
         for i, item in enumerate(argv):
-            c.text(item, f"{path}.argv[{i}]")
-    for section in ("env", "cache_env"):
-        if section in queue:
-            mapping = c.mapping(queue[section], f"{path}.{section}")
-            for key, item in (mapping or {}).items():
-                c.text(item, f"{path}.{section}.{key}")
+            _arg_or_slot(c, item, f"{path}.argv[{i}]")
+    if "env" in queue:
+        for key, item in (c.mapping(queue["env"], f"{path}.env") or {}).items():
+            _arg_or_slot(c, item, f"{path}.env.{key}")
+    if "cache_env" in queue:
+        for key, item in (c.mapping(queue["cache_env"], f"{path}.cache_env") or {}).items():
+            c.text(item, f"{path}.cache_env.{key}")
     for key in ("target_env", "source_globs"):
         if key in queue:
             c.string_list(queue[key], f"{path}.{key}")
-    if "container" in queue and not isinstance(queue["container"], bool):
-        c.error(f"{path}.container", "must be true or false")
+    if "container" in queue and queue["container"] is not False:
+        container = c.mapping(queue["container"], f"{path}.container")
+        if container is not None and c.keys(container, f"{path}.container", ("paths",), ()):
+            c.string_list(container["paths"], f"{path}.container.paths", minimum=1)
+
+
+def _arg_or_slot(c: _Check, value: Any, path: str) -> None:
+    """A literal string, or a declared path slot `{slot: <template>, access: read|write}` (K-42)."""
+    if isinstance(value, dict):
+        if c.keys(value, path, ("slot", "access"), ()):
+            c.text(value["slot"], f"{path}.slot")
+            c.enum(value["access"], f"{path}.access", ACCESS)
+        return
+    c.text(value, path)
+
+
+def _resource_spelling(c: _Check, value: Any, path: str) -> None:
+    """A leased resource whose path carries a slot delimiter can never be put into a slot (K-42, W-98a)."""
+    from .hostqueue.jobspec import spelling_problem
+
+    problem = spelling_problem(value) if isinstance(value, str) else None
+    if problem:
+        c.error(path, problem)
 
 
 def _build_queue(c: _Check, value: Any) -> None:
     queue = c.mapping(value, "build_queue")
     required = ("state", "policy_id", "project", "exec_root", "log_root", "targets")
-    if queue is None or not c.keys(
-        queue, "build_queue", required, ("caches", "inherit_env", "cleanup_references")
-    ):
+    if queue is None or not c.keys(queue, "build_queue", required, ("caches", "inherit_env")):
         return
     for key in required[:-1]:
         c.text(queue[key], f"build_queue.{key}")
+    for key in ("exec_root", "log_root"):
+        _resource_spelling(c, queue[key], f"build_queue.{key}")
     targets = c.mapping(queue["targets"], "build_queue.targets")
     if targets is not None and not targets:
         c.error("build_queue.targets", "needs at least one target")
@@ -315,6 +338,7 @@ def _build_queue(c: _Check, value: Any) -> None:
         if target is None or not c.keys(target, path, ("path", "kind"), ("owner_agent",)):
             continue
         c.text(target["path"], f"{path}.path")
+        _resource_spelling(c, target["path"], f"{path}.path")
         c.enum(target["kind"], f"{path}.kind", TARGET_KINDS)
         if "owner_agent" in target:
             c.text(target["owner_agent"], f"{path}.owner_agent")
@@ -322,14 +346,9 @@ def _build_queue(c: _Check, value: Any) -> None:
         caches = c.mapping(queue["caches"], "build_queue.caches")
         for name, item in (caches or {}).items():
             c.text(item, f"build_queue.caches.{name}")
+            _resource_spelling(c, item, f"build_queue.caches.{name}")
     if "inherit_env" in queue:
         c.string_list(queue["inherit_env"], "build_queue.inherit_env")
-    if "cleanup_references" in queue:
-        refs = c.mapping(queue["cleanup_references"], "build_queue.cleanup_references")
-        kinds = ("work_packages", "incidents", "authority_cache")
-        if refs is not None and c.keys(refs, "build_queue.cleanup_references", kinds, ()):
-            for kind in kinds:
-                c.string_list(refs[kind], f"build_queue.cleanup_references.{kind}", minimum=1)
 
 
 def _delegation(c: _Check, value: Any) -> None:

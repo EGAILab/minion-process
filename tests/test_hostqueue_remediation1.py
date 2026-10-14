@@ -1,5 +1,6 @@
 """Witnesses and executed negative controls for Codex's implementation review round 7 (PROC-KIT-P3B-R002,
-R003, R005, R006, R008, R009, R010), and real substitutions for the controls C-1, C-2, C-4 and C-9.
+R003, R005, R008, R009, R010; R006 withdrawn by the Owner), and real substitutions for the controls
+C-1, C-2, C-4 and C-9.
 
 A "control" test here swaps the agreed rule for the wrong one and asserts that the hazard appears. Its
 paired witness asserts the hazard does not appear with the real code."""
@@ -106,12 +107,13 @@ def test_r002_control_losing_the_stray_identity_ends_live_work(tmp_path: Path) -
 @pytest.mark.parametrize(
     ("change", "message"),
     [
-        (lambda q: q.update(env={"CARGO_TARGET_DIR": "C:\\elsewhere"}), "bound variable"),
-        (lambda q: q.update(env={"OUT": "C:\\elsewhere"}), "not contained"),
-        (lambda q: q.update(env={"OUT": "{target}\\..\\gate2"}), "not contained"),
-        (lambda q: q.update(env={"TMP": "{workdir}"}), "bound variable"),
+        # Revision 3 (K-42): every round-7 case is now refused by the slot rules, never by scanning.
+        (lambda q: q.update(env={"CARGO_TARGET_DIR": "C:\\elsewhere"}), "repeats target_env"),
+        (lambda q: q.update(env={"OUT": "C:\\elsewhere"}), "K-42"),
+        (lambda q: q.update(env={"OUT": "{target}\\..\\gate2"}), "K-42"),
+        (lambda q: q.update(env={"TMP": {"slot": "{workdir}", "access": "write"}}), "repeats kit"),
         (lambda q: q.update(cache_env={"CARGO_HOME": "undeclared"}), "does not declare"),
-        (lambda q: q.update(argv=["cargo", "--out", "{target}"]), None),
+        (lambda q: q.update(argv=["cargo", "--out", {"slot": "{target}", "access": "write"}]), None),
     ],
 )
 def test_r003_environment_binding(tmp_path: Path, change: Any, message: str | None) -> None:
@@ -128,11 +130,11 @@ def test_r003_unleased_contained_paths_are_refused(tmp_path: Path) -> None:
     w = make_world(tmp_path)
     other = str(w.root / "targets" / "gate2")
     edit_profile(w, lambda d: d["gates"]["rust"]["queue"].update(env={"OUT": other}))
-    assert "not a leased resource" in w.submit()["error"]
+    assert "K-42" in w.submit()["error"]  # a path reaches a tool only through a placeholder slot
     edit_profile(
         w, lambda d: d["gates"]["rust"]["queue"].update(env={}, argv=["docker", "-v", f"{other}:/x"])
     )
-    assert "not a leased resource" in w.submit()["error"]
+    assert "K-42" in w.submit()["error"]
 
 
 def test_r003_caches_are_declared_and_leased_shared(tmp_path: Path) -> None:
@@ -178,7 +180,7 @@ def test_r003_inherited_environment_drift_refuses_at_launch(
 def test_r003_inherit_env_may_not_name_a_bound_variable(tmp_path: Path) -> None:
     w = make_world(tmp_path)
     edit_profile(w, lambda d: d["build_queue"].update(inherit_env=["PATH", "TMP"]))
-    assert "bound variable TMP" in w.submit()["error"]
+    assert "TMP repeats kit" in w.submit()["error"]
     edit_profile(w, lambda d: d["build_queue"].update(inherit_env="PATH"))
     assert "list of variable names" in w.submit()["error"]
     edit_profile(w, lambda d: d["build_queue"].update(inherit_env=["PATH"], caches=[1]))
@@ -306,150 +308,6 @@ def test_r005_empty_render_folder_is_ignored(tmp_path: Path) -> None:
     assert w.restart().mode == "normal"
 
 
-# == R006: cleanup contract ================================================================================
-
-
-def _copy(w: World) -> tuple[str, Path]:
-    job_id = int(w.submit("evidence", sha=SHA)["job_id"])
-    job = w.job(job_id)
-    (w.queue / "jobs" / str(job_id) / "result").write_bytes(encode({"exit": 1, "gate_end": 1}))
-    w.host.finish(job.spec["group"], w.host.spawned[-1]["runner"])
-    w.broker.step()
-    return str(job.spec["job_label"]), Path(str(job.spec["workdir"]))
-
-
-def _cleanup(w: World, copy_id: str, apply: bool | None) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "type": "submit",
-        "class": "cleanup",
-        "profile": str(w.profile),
-        "copies": [copy_id],
-        "submitter": {"pane": "w1:p1", "session": "s1"},
-    }
-    if apply is not None:
-        body["apply"] = apply
-    return w.request(body)
-
-
-def test_r006_cleanup_is_a_dry_run_unless_applied(tmp_path: Path) -> None:
-    w = make_world(tmp_path)
-    copy_id, workdir = _copy(w)
-    job = w.job(_cleanup(w, copy_id, None)["job_id"])
-    w.broker.step()
-    assert job.outcome == "dry-run" and workdir.exists()
-    report = (w.queue / "jobs" / str(job.job_id) / "report").read_text()
-    assert "would remove" in report and str(workdir).lower() in report.lower()
-    assert w.broker.state.copies[copy_id]["state"] == "registered"
-    applied = w.job(_cleanup(w, copy_id, True)["job_id"])
-    w.broker.step()
-    assert applied.outcome == "passed" and not workdir.exists()
-
-
-def test_r006_late_submission_naming_an_actively_cleaned_copy_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(broker_mod, "CLEANUP_BATCH", 1)
-    w = make_world(tmp_path)
-    copy_id, workdir = _copy(w)
-    job = w.job(_cleanup(w, copy_id, True)["job_id"])
-    w.broker.step()
-    assert job.status == "running"
-    late = w.submit("build", "gate2", checkout=str(workdir))
-    assert "leased by cleanup job" in late["error"]
-
-
-def test_r006_late_reference_stops_the_next_batch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(broker_mod, "CLEANUP_BATCH", 1)
-    w = make_world(tmp_path)
-    copy_id, workdir = _copy(w)
-    job = w.job(_cleanup(w, copy_id, True)["job_id"])
-    w.broker.step()
-    (w.root / "incidents" / "new.md").write_text(f"keep {workdir}\n", encoding="utf-8")
-    w.broker.step()
-    assert job.outcome == "failed" and "referenced in" in str(job.reason) and workdir.exists()
-
-
-@pytest.mark.parametrize(
-    ("setup", "message"),
-    [
-        (lambda w, p: w.git.clean_state.__setitem__(str(p), False), "not a clean worktree"),
-        (lambda w, p: w.git.unpushed_commits.__setitem__(str(p), ["c1"]), "not reachable from a remote"),
-        (lambda w, p: w.git.unpushed_commits.__setitem__(str(p), None), "reachability unknown"),
-    ],
-)
-def test_r006_git_predicates(tmp_path: Path, setup: Any, message: str) -> None:
-    w = make_world(tmp_path)
-    copy_id, workdir = _copy(w)
-    from minion_process.hostqueue.resources import canonical
-
-    setup(w, canonical(workdir))
-    job = w.job(_cleanup(w, copy_id, True)["job_id"])
-    w.broker.step()
-    assert message in str(job.reason) and workdir.exists()
-
-
-@pytest.mark.parametrize(
-    ("change", "message"),
-    [
-        (lambda q: q.pop("cleanup_references"), "must declare"),
-        (lambda q: q["cleanup_references"].update(work_packages="cmd"), "must be a command"),
-        (lambda q: q["cleanup_references"].update(work_packages=["no-such-command-xyz"]), "unreadable"),
-        (
-            lambda q: q["cleanup_references"].update(work_packages=["python", "-c", "raise SystemExit(3)"]),
-            "exit 3",
-        ),
-        (lambda q: q["cleanup_references"].update(authority_cache=[]), "at least one path"),
-    ],
-)
-def test_r006_reference_set_must_be_complete_and_readable(tmp_path: Path, change: Any, message: str) -> None:
-    w = make_world(tmp_path)
-    copy_id, workdir = _copy(w)
-    edit_profile(w, lambda d: change(d["build_queue"]))
-    job = w.job(_cleanup(w, copy_id, True)["job_id"])
-    w.broker.step()
-    assert message in str(job.reason) and workdir.exists()
-
-
-def test_r006_work_package_states_mention_the_copy(tmp_path: Path) -> None:
-    w = make_world(tmp_path)
-    copy_id, workdir = _copy(w)
-    edit_profile(
-        w,
-        lambda d: d["build_queue"]["cleanup_references"].update(
-            work_packages=["python", "-c", f"print({str(workdir)!r})"]
-        ),
-    )
-    job = w.job(_cleanup(w, copy_id, True)["job_id"])
-    w.broker.step()
-    assert "open work packages" in str(job.reason)
-
-
-def test_r006_protected_store_overlap(tmp_path: Path) -> None:
-    w = make_world(tmp_path)
-    copy_id, workdir = _copy(w)
-    edit_profile(
-        w,
-        lambda d: d["build_queue"]["targets"].update(
-            {"overlap": {"path": str(workdir / "sub"), "kind": "gate"}}
-        ),
-    )
-    job = w.job(_cleanup(w, copy_id, True)["job_id"])
-    w.broker.step()
-    assert "protected store" in str(job.reason) and workdir.exists()
-
-
-def test_r006_control_without_the_predicates_removes_a_referenced_copy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    w = make_world(tmp_path)
-    copy_id, workdir = _copy(w)
-    (w.root / "incidents" / "keep.md").write_text(f"keep {workdir}\n", encoding="utf-8")
-    monkeypatch.setattr(Broker, "_cleanup_predicates", lambda self, job: None)
-    w.job(_cleanup(w, copy_id, True)["job_id"])
-    w.broker.step()
-    assert not workdir.exists()  # the hazard
-
-
 # == R008: challenge expiry bound to a boot ===============================================================
 
 
@@ -541,7 +399,6 @@ def test_r009_no_mutation_runs_without_a_proof(tmp_path: Path, monkeypatch: pyte
         lambda: fsops.replace([root], root / "s", root / "d"),
         lambda: fsops.publish([root], root / "s", root / "d", lambda s, d: calls.append("publish")),
         lambda: fsops.unlink([root], root / "f"),
-        lambda: fsops.rmdir([root], root / "d"),
         lambda: fsops.utime([root], root / "f"),
         lambda: fsops.open_append([root], root / "log"),
     ]
@@ -628,8 +485,6 @@ MALFORMED = [
     {"type": "cancel", "job_id": 1, "submitter": []},
     {"type": "submit", "class": "build", "profile": "p", "submitter": ["x"]},
     {"type": "submit", "class": "build", "profile": "p", "submitter": {}, "launcher": ["x"]},
-    {"type": "submit", "class": "cleanup", "profile": "p", "submitter": {}, "copies": "x"},
-    {"type": "submit", "class": "cleanup", "profile": "p", "submitter": {}, "copies": ["x"], "apply": "yes"},
     {
         "type": "submit",
         "class": "build",
@@ -681,7 +536,7 @@ def test_r010_control_without_shape_checks_wedges_the_broker(
 
 
 def test_r010_unknown_type_is_an_ordinary_refusal() -> None:
-    assert requests.malformed({"type": "nonsense"}) is None
+    assert requests.malformed({"type": "nonsense", "request_id": "r"}) is None
 
 
 # == real substitutions for C-1, C-2, C-9 ==================================================================

@@ -80,11 +80,6 @@ def unlink(roots: Roots, path: Path) -> None:
     os.unlink(path)
 
 
-def rmdir(roots: Roots, path: Path) -> None:
-    assert_inside(roots, path, final_entry=True)
-    os.rmdir(path)
-
-
 def utime(roots: Roots, path: Path) -> None:
     assert_inside(roots, path)
     os.utime(path, None)

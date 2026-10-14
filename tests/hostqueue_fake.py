@@ -49,6 +49,12 @@ class FakeHost:
         return ProcessIdentity(4242, 1)
 
     def process_alive(self, ident: ProcessIdentity) -> bool | None:
+        """`processes` maps (pid, birth) to alive (True), exited (False) or unknown (None). An identity
+        recorded with an unknown birth is alive-or-unknown while any process with that id has not exited
+        (K-41); a known birth is looked up exactly, so a different birth is a reused id."""
+        if ident.start is None:
+            present = [alive for (pid, _birth), alive in self.processes.items() if pid == ident.pid]
+            return None if any(alive is not False for alive in present) else False
         return self.processes.get((ident.pid, ident.start), False)
 
     def spawn(self, argv: list[str], env: dict[str, str], cwd: Path, log: Path, group: str) -> Spawned:
@@ -116,9 +122,8 @@ class FakeGit:
     heads: dict[str, str | None] = field(default_factory=dict)
     clean_state: dict[str, bool | None] = field(default_factory=dict)
     add_error: OSError | None = None
-    pruned: list[Path] = field(default_factory=list)
-    unpushed_commits: dict[str, list[str] | None] = field(default_factory=dict)
     files: tuple[str, ...] = ("src/lib.rs", "Cargo.toml")
+    plant: Any = None  # called with the new worktree, e.g. to check out a committed link (W-99d)
 
     def add_worktree(self, source: Path, workdir: Path, sha: str) -> None:
         if self.add_error is not None:
@@ -127,6 +132,8 @@ class FakeGit:
             path = workdir / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"{sha}\n", encoding="utf-8")
+        if self.plant is not None:
+            self.plant(workdir)
         self.heads.setdefault(str(workdir), sha)
         self.clean_state.setdefault(str(workdir), True)
 
@@ -135,12 +142,6 @@ class FakeGit:
 
     def clean(self, workdir: Path) -> bool | None:
         return self.clean_state.get(str(workdir))
-
-    def prune(self, source: Path) -> None:
-        self.pruned.append(source)
-
-    def unpushed(self, workdir: Path) -> list[str] | None:
-        return self.unpushed_commits.get(str(workdir), [])
 
 
 def pane_info(session: str, agent: str = "claude") -> dict[str, Any]:

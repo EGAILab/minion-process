@@ -18,10 +18,55 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class ProcessIdentity:
-    """A process is its id plus its start time, so a reused id is never mistaken for it (B-18, W-10)."""
+    """A process is its id plus its birth time, so a reused id is never mistaken for it (B-18, W-10).
+
+    The birth time is known (a positive integer in the OS's own unit, 100-ns ticks on Windows) or unknown
+    (`None`). No number stands for unknown (K-41, W-96). An identity recorded with an unknown birth stays
+    unknown: a later successful birth query cannot tell whether it answers for the same process."""
 
     pid: int
-    start: int  # OS start time in the OS's own unit (100-ns ticks on Windows)
+    start: int | None
+
+    def __post_init__(self) -> None:
+        start = self.start
+        if start is not None and (not isinstance(start, int) or isinstance(start, bool) or start <= 0):
+            raise ValueError(f"a known birth time is a positive integer, got {start!r}; unknown is None")
+
+    def as_record(self) -> dict[str, int | None]:
+        return {"pid": self.pid, "start": self.start}
+
+    @classmethod
+    def from_record(cls, record: dict[str, object]) -> ProcessIdentity:
+        start = record.get("start")
+        return cls(int(str(record["pid"])), None if start is None else int(str(start)))
+
+
+# What one inspection of a recorded identity observed (K-41). Each step answers or fails.
+NO_SUCH_ID = "no-such-id"  # the id does not exist (Windows: OpenProcess fails with ERROR_INVALID_PARAMETER)
+OPEN_FAILS = "open-fails"  # any other failure to open the process
+QUERY_FAILS = "query-fails"  # the birth or the exit query failed
+STILL_ACTIVE = "still-active"
+EXITED = "exited"
+
+
+def liveness(recorded: int | None, opened: str, birth: int | str, exit_state: str) -> bool | None:
+    """K-41: `False` ended, `True` alive, `None` unknown (for an unknown recorded birth, alive-or-unknown).
+
+    - The process id does not exist: ended, whatever was recorded.
+    - Any inspection failure: unknown.
+    - An unknown recorded birth while the id exists: alive-or-unknown, whatever the current birth time or
+      exit code, because the process may be the same one.
+    - A known recorded birth that differs from the current one: the id was reused, so the process ended.
+    """
+    if opened == NO_SUCH_ID:
+        return False
+    if opened == OPEN_FAILS or recorded is None or birth == QUERY_FAILS:
+        return None
+    if birth != recorded:
+        return False
+    if exit_state == QUERY_FAILS:
+        return None
+    return exit_state == STILL_ACTIVE
 
 
 @dataclass(frozen=True)
@@ -56,7 +101,9 @@ class HostOS(Protocol):
 
     def self_identity(self) -> ProcessIdentity: ...
 
-    def process_alive(self, ident: ProcessIdentity) -> bool | None: ...
+    def process_alive(self, ident: ProcessIdentity) -> bool | None:
+        """`liveness` of the identity: False ended, True alive, None unknown or alive-or-unknown."""
+        ...
 
     def spawn(self, argv: list[str], env: dict[str, str], cwd: Path, log: Path, group: str) -> Spawned:
         """Create the process suspended, assign it to a new tracking group named `group` with no kill

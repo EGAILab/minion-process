@@ -217,27 +217,18 @@ def _make_dir_link(link: Path, target: Path) -> None:
 # -- walk ------------------------------------------------------------------------------------------------
 
 
-def test_walk_never_follows_a_link_and_removes_only_the_link(tmp_path: Path) -> None:
+def test_walk_never_follows_a_link(tmp_path: Path) -> None:
     root = tmp_path / "copy"
     (root / "d").mkdir(parents=True)
     (root / "d" / "f.txt").write_text("x")
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "precious.txt").write_text("keep")
-    _make_dir_link(root / "j", outside)  # W-31: a nested outward junction
-    listed = [e.path.relative_to(root).as_posix() for e in walk.entries(root)]
-    assert "j/precious.txt" not in listed and "j" in listed
-    bottom_up = [e.path.relative_to(root).as_posix() for e in walk.entries(root, bottom_up=True)]
-    assert bottom_up.index("d/f.txt") < bottom_up.index("d")
+    _make_dir_link(root / "j", outside)  # a nested outward junction
+    found = {e.path.relative_to(root).as_posix(): e for e in walk.entries(root)}
+    assert "j/precious.txt" not in found and found["j"].is_link and found["j"].link_is_dir
+    assert list(found).index("d") < list(found).index("d/f.txt")
     assert [p.name for p in walk.files(root)] == ["f.txt"]
-    from minion_process.hostqueue import fsops
-
-    for entry in walk.entries(root, bottom_up=True):
-        if entry.is_dir or entry.link_is_dir:
-            fsops.rmdir([tmp_path], entry.path)
-        else:
-            fsops.unlink([tmp_path], entry.path)
-    assert not os.listdir(root) and (outside / "precious.txt").read_text() == "keep"
 
 
 def test_walk_failure_propagates(tmp_path: Path) -> None:

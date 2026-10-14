@@ -35,7 +35,8 @@ gates:                                    # `queue` makes a gate runnable by the
     launcher: "scripts/gates-rust.sh"
     tiers: [g0, g1, g2, g3]
     queue:
-      argv: [cargo, test, --manifest-path, "{checkout}/Cargo.toml"]
+      # A path reaches the tool only through a declared slot (K-42); `{checkout}` is read only.
+      argv: [cargo, test, --manifest-path, {slot: "{checkout}/Cargo.toml", access: read}]
       target_env: [CARGO_TARGET_DIR]
       source_globs: ["**/*.rs", "**/Cargo.toml", "Cargo.lock"]
       env: {CARGO_BUILD_JOBS: "4"}
@@ -55,10 +56,6 @@ build_queue:                              # docs/p3b/: one broker per host; this
   caches:
     cargo-home: "E:/Example/project/.tmp/cache/cargo-home"
   inherit_env: [PATH, PATHEXT, SYSTEMROOT, SYSTEMDRIVE, WINDIR, COMSPEC]
-  cleanup_references:
-    work_packages: [python, -m, minion_process, open-states]
-    incidents: ["E:/Example/project/assurance/incidents"]
-    authority_cache: ["E:/Example/project/.tmp/authority"]
 
 delegation: {source: "https://github.com/ORG/example/issues/1", routing: false}
 wp_kinds_enabled: [semantic, delta, process, scoping, status]

@@ -9,7 +9,6 @@
     minion-process build release --queue Q --job N
     minion-process build policy --queue Q --file policy.yaml --decision <link>
     minion-process build repair --queue Q inspect|quarantine|resume
-    minion-process build cleanup --profile P --copies C1,C2 --pane P --session S [--apply]
     minion-process session start --profile P --agent A [--out report.yaml]
     minion-process faults check <matrix.yaml>
     minion-process dispatch <issue> --queue Q --pane P --session S [--mark-undelivered HASH:ATTEMPT]
@@ -17,6 +16,9 @@
 Override requests (`release`, `policy`, `repair quarantine`, `repair resume`) print the challenge.
 The Owner confirms it by typing `CONFIRM QUEUE <code>` in a Claude session (K-21). No agent ever types,
 relays or sends keys for that code.
+
+There is no cleanup verb in 0.4.0 (K-47). `build status` lists every registered copy with its creator and
+state, and a copy is removed only by hand (K-48'').
 """
 
 from __future__ import annotations
@@ -74,12 +76,6 @@ def add_parsers(sub: Any) -> None:
     repair = verbs.add_parser("repair")
     repair.add_argument("--queue", required=True)
     repair.add_argument("action", choices=["inspect", "quarantine", "resume"])
-    cleanup = verbs.add_parser("cleanup")
-    cleanup.add_argument("--profile", required=True)
-    cleanup.add_argument("--copies", required=True)
-    cleanup.add_argument("--pane", required=True)
-    cleanup.add_argument("--session", required=True)
-    cleanup.add_argument("--apply", action="store_true", help="remove; without it the cleanup is a dry run")
     session = sub.add_parser("session")
     session.add_argument("action", choices=["start"])
     session.add_argument("--profile", required=True)
@@ -145,19 +141,6 @@ def run_build(args: Any, host_factory: Any = None, git_factory: Any = None) -> i
         if args.sha:
             request["sha"] = args.sha
         return _call(queue, request, args.timeout)
-    if args.verb == "cleanup":
-        return _call(
-            _queue_of(args.profile),
-            {
-                "type": "submit",
-                "class": "cleanup",
-                "profile": str(Path(args.profile).resolve()),
-                "copies": args.copies.split(","),
-                "apply": bool(args.apply),
-                "submitter": {"pane": args.pane, "session": args.session},
-            },
-            30.0,
-        )
     queue = Path(args.queue)
     if args.verb == "status":
         return _call(queue, {"type": "status", **({"job_id": args.job} if args.job else {})}, 30.0)
@@ -219,7 +202,7 @@ def session_start(profile_path: Path, agent: str, gh_issues: Any = None) -> dict
         "repos": {},
         "work_packages": [],
         "queue": None,
-        "cleanup_candidates": [],
+        "registered_copies": [],
     }
 
     def failed(item: str) -> None:
@@ -262,7 +245,7 @@ def session_start(profile_path: Path, agent: str, gh_issues: Any = None) -> dict
     queue_dir = (profile.get("build_queue") or {}).get("state")
     if queue_dir:
         try:
-            report["queue"], report["cleanup_candidates"] = _queue_summary(Path(str(queue_dir)))
+            report["queue"], report["registered_copies"] = _queue_summary(Path(str(queue_dir)))
         except (OSError, InvariantError, ValueError) as exc:
             failed(f"queue unreadable: {exc}")
     if gh_issues is not None:
@@ -273,7 +256,7 @@ def session_start(profile_path: Path, agent: str, gh_issues: Any = None) -> dict
     return report
 
 
-def _queue_summary(queue: Path) -> tuple[dict[str, list[int]], list[str]]:
+def _queue_summary(queue: Path) -> tuple[dict[str, list[int]], list[dict[str, Any]]]:
     """Read-only replay of the current generation. An unreadable generation marker or a missing journal
     is unknown, never an empty queue (K-36)."""
     markers = Markers(queue, None, "reader")  # type: ignore[arg-type]
@@ -299,17 +282,17 @@ def _queue_summary(queue: Path) -> tuple[dict[str, list[int]], list[str]]:
         "waiting": [j.job_id for j in state.waiting()],
         "uncertain": [j.job_id for j in state.jobs.values() if j.status == "uncertain"],
     }
-    candidates = []
-    for copy_id, copy in sorted(state.copies.items()):
-        creator = state.jobs.get(int(copy["creator"]))
-        if (
-            copy["state"] == "registered"
-            and creator is not None
-            and creator.status in ("ended", "refused")
-            and not creator.retain
-        ):
-            candidates.append(copy_id)
-    return summary, candidates
+    # Registered copies are listed, never classified as removable (checkpoint r13, Part B).
+    copies = [
+        {
+            "copy": copy_id,
+            "creator": copy["creator"],
+            "state": state.copy_state(copy_id),
+            "path": copy["path"],
+        }
+        for copy_id, copy in sorted(state.copies.items())
+    ]
+    return summary, copies
 
 
 def run_session(args: Any, gh_issues: Any = None) -> int:

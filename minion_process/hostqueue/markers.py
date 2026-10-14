@@ -31,7 +31,6 @@ KINDS = (
     "undelivered",
     "policy",
     "confirm",
-    "cleanup",
     "register",
     "accept",
     "generation",

@@ -1,4 +1,4 @@
-"""The host broker: the only writer of queue state (B-1 to B-33, K-1 to K-40 of `docs/p3b/`).
+"""The host broker: the only writer of queue state (`docs/p3b/`, effective rule set of checkpoint r15).
 
 One `Broker` holds the host-wide OS mutex for its whole life. Each `step()` does three things:
 
@@ -8,7 +8,9 @@ One `Broker` holds the host-wide OS mutex for its whole life. Each `step()` does
 
 Every state change is a flushed journal record written before the change is acted on. Every protected
 effect is guarded by a write-ahead marker published before the effect. The broker never kills, stops or
-signals a process, and it sends no keystrokes to any pane (K-1).
+signals a process, and it sends no keystrokes to any pane (K-1). It deletes and renames only inside its own
+queue folder (K-46): there is no cleanup class in 0.4.0 (K-47), and a registered copy is removed only by
+hand (K-48'').
 """
 
 from __future__ import annotations
@@ -18,13 +20,10 @@ import hashlib
 import json
 import os
 import secrets
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from . import fsops, layout
 from .contain import Contained, assert_inside
@@ -37,12 +36,13 @@ from .markers import MarkerExists, Markers, Unreadable
 from .policy import Policy, PolicyError
 from .policy import parse as parse_policy
 from .requests import malformed
-from .resources import canonical, conflicts
-from .state import TERMINAL, InvariantError, Job, QueueState, decide
-from .walk import classify, entries, files
+from .resources import canonical, overlaps
+from .state import InvariantError, Job, QueueState, decide
+from .walk import TreeProof, Unproven, entries, files, prove_tree
 
 CHALLENGE_SECONDS = 15 * 60
-CLEANUP_BATCH = 200
+INSPECTED = "inspected"  # an end established by K-41 workload inspection
+HUMAN_CONFIRMED = "human-confirmed"  # an end established by an authorized confirmed release (K-23)
 
 
 class BrokerRefused(RuntimeError):
@@ -71,7 +71,6 @@ class Broker:
         self.policy: Policy | None = None
         self.repair_challenges: dict[str, dict[str, Any]] = {}  # repair mode without a journal: in memory
         self.replay: Replay | None = None
-        self.cleanup_progress: dict[int, list[tuple[str, str]]] = {}
         self.pending: list[tuple[str, dict[str, Any]]] = []
         self.unsafe: list[str] = []
         self.generation_unknown = False
@@ -231,6 +230,7 @@ class Broker:
                         f"confirm/{challenge}: consumed; "
                         "an effect without its own marker is not restored (K-33)"
                     )
+            self._reconcile_overrides(outcomes, add)
             self._reconcile_policies(outcomes, add, unsafe)
             self._reconcile_copies(outcomes, add, unsafe)
         except OSError as exc:
@@ -313,6 +313,7 @@ class Broker:
                         outcome="unknown-outcome",
                         eligible=False,
                         reason="launched before the damaged record; outcome unknown",
+                        proof=INSPECTED,
                     )
                     outcomes.append(
                         f"job {job_id}: launched and finished; ended(unknown-outcome), not relaunched"
@@ -390,25 +391,72 @@ class Broker:
             outcomes.append(f"policy/{version}: in force")
             current = version
 
+    def _reconcile_overrides(self, outcomes: list[str], add: Any) -> None:
+        """K-48'' replay rows 3 and 4. An intact authorized confirmed release is restored as K-23 bound it,
+        without re-inspecting the workload. An ambiguous one is not restored (K-33): the job is uncertain
+        again and holds its resources, its copy lease included."""
+        for job in sorted(self.state.jobs.values(), key=lambda j: j.job_id):
+            if job.status != "ended" or job.outcome != HUMAN_CONFIRMED:
+                continue
+            problem = self._override_problem(job)
+            if problem is None:
+                outcomes.append(
+                    f"job {job.job_id}: confirmed release intact; ended(human-confirmed) restored, "
+                    "not re-inspected"
+                )
+                continue
+            add(
+                "override-unrestored",
+                job_id=job.job_id,
+                reason=f"confirmed release {problem}; effect may have occurred; not restored (K-33)",
+            )
+            outcomes.append(f"job {job.job_id}: confirmed release {problem}; uncertain, resources held")
+
+    def _override_problem(self, job: Job) -> str | None:
+        """Why the record of a job's confirmed release is not intact, or None. Intact means its journal
+        record names the release challenge for this job, that challenge was consumed in the generation it
+        was bound to, and its `confirm/<challenge>` marker reads back."""
+        override = job.override if isinstance(job.override, dict) else {}
+        challenge = self.state.challenges.get(str(override.get("challenge_id")))
+        if (
+            challenge is None
+            or challenge.get("action") != "release"
+            or challenge.get("scope", {}).get("job_id") != job.job_id
+        ):
+            return "does not match a release challenge for this job"
+        if challenge.get("state") != "consumed":
+            return "has no consumed confirmation"
+        if challenge["scope"].get("generation") != override.get("generation"):
+            return "was recorded under another journal generation"
+        if not isinstance(self.markers.read("confirm", str(override["challenge_id"])), dict):
+            return "has an unreadable confirmation marker"
+        return None
+
     def _reconcile_copies(self, outcomes: list[str], add: Any, unsafe: Any) -> None:
+        """K-38, K-39, K-48'': rebuild registrations from readable `register/` markers. A registration whose
+        manifest disagrees with the disk is `damaged` and stays registered. A missing copy is not damage:
+        `status` reports it as absent, and the broker never re-creates, repairs or deletes it."""
+        jobs = self._restored_jobs()
         for copy_id in self.markers.names("register"):
             marker = self.markers.read("register", copy_id)
+            known = self.state.copies.get(copy_id)
             if not isinstance(marker, dict):
-                unsafe(f"register/{copy_id}: unreadable; copy damaged")
+                if known is None:
+                    unsafe(f"register/{copy_id}: unreadable and not in the journal; its path is unknown")
+                elif not known.get("damaged"):
+                    add("copy-damaged", copy_id=copy_id, reason="registration marker unreadable")
+                    outcomes.append(f"copy {copy_id}: registration marker unreadable; damaged, registered")
                 continue
-            if copy_id not in self.state.copies:
+            if known is None:
+                if marker["job_id"] not in jobs:
+                    unsafe(f"register/{copy_id}: copy of unknown job {marker['job_id']}")
+                    continue
                 add("register", copy_id=copy_id, path=marker["path"], job_id=marker["job_id"])
                 outcomes.append(f"register/{copy_id}: restored")
-        for job_name in self.markers.names("cleanup"):
-            for copy_id, copy in self.state.copies.items():
-                if str(copy.get("job_id")) != job_name or copy.get("state") == "removed":
-                    continue
-                extent = self.copy_extent(copy_id, int(job_name))
-                if extent != copy.get("state"):
-                    add("copy-state", copy_id=copy_id, state=extent)
-                outcomes.append(f"copy {copy_id}: {extent}")
-                if extent == "damaged":
-                    unsafe(f"copy {copy_id}: damaged; never reused, held until a cleanup job finishes it")
+            problem = _manifest_problem(Path(str(marker["path"])), marker["manifest"])
+            if problem and not (known or {}).get("damaged"):
+                add("copy-damaged", copy_id=copy_id, reason=problem)
+                outcomes.append(f"copy {copy_id}: {problem}; damaged, registered, never reused")
 
     def _placeholder(self, add: Any, job_id: int, why: str) -> None:
         """A job whose footprint is unknown: evidence class, uncertain, extent unknown, so it blocks the
@@ -438,30 +486,11 @@ class Broker:
                 active = False
         alive: bool | None = False
         if runner:
-            alive = self.host.process_alive(ProcessIdentity(int(runner["pid"]), int(runner["start"])))
+            alive = self.host.process_alive(ProcessIdentity.from_record(runner))
         containers = self.host.containers_running(str(spec.get("job_label", "")))
         if active is None or containers is None or alive is None:
             return None
         return bool(active or containers or alive)
-
-    def copy_extent(self, copy_id: str, job_id: int) -> str:
-        """K-39: `registered` (untouched), `cleaning` (every missing entry has a marker; some entries may be
-        pending), or `damaged` (an entry is missing without a marker, or a marker is unreadable)."""
-        reg = self.markers.read("register", copy_id)
-        if not isinstance(reg, dict):
-            return "damaged"
-        deleted: set[str] = set()
-        for entry in self.markers.names("cleanup", str(job_id)):
-            marker = self.markers.read("cleanup", str(job_id), entry)
-            if not isinstance(marker, dict):
-                return "damaged"
-            if marker.get("copy_id") == copy_id:
-                deleted.add(str(marker["path"]))
-        root = Path(str(reg["path"]))
-        for relative in reg["manifest"]:
-            if not os.path.lexists(root / relative) and relative not in deleted:
-                return "damaged"
-        return "cleaning" if deleted else "registered"
 
     def _apply_pending(self, outcomes: list[str]) -> None:
         for kind, fields in self.pending:
@@ -525,12 +554,12 @@ class Broker:
             except FramingError as exc:
                 self._reject_file(path, request_id, f"unreadable request: {exc}")
                 continue
-            if request.get("request_id") != request_id:
-                self._reject_file(path, request_id, "request id does not match its file name")
-                continue
-            problem = malformed(request)
+            problem = malformed(request)  # K-44: total, so it runs before any field is read
             if problem is not None:  # R010: rejected alone, never raised, never dispatched
                 self._reject_file(path, request_id, f"malformed request: {problem}")
+                continue
+            if request["request_id"] != request_id:
+                self._reject_file(path, request_id, "request id does not match its file name")
                 continue
             self._respond(request_id, self._handle(request))
             fsops.unlink([self.root], path)
@@ -599,9 +628,7 @@ class Broker:
                 job_id,
                 self.host.pane(str(pane)) if pane else None,
             )
-            if spec["class"] == "cleanup":
-                spec["leases"] = self._cleanup_leases(spec["copies"])
-            self._refuse_cleaned(spec)
+            self._refuse_registered(spec)
         except SpecError as exc:
             self._record("reject", request_id=request_id, reason=str(exc))
             return {"ok": False, "error": str(exc)}
@@ -610,31 +637,26 @@ class Broker:
         self._record("accept", request_id=request_id, job_id=job_id, spec=spec)
         return {"ok": True, "job_id": job_id}
 
-    def _refuse_cleaned(self, spec: dict[str, Any]) -> None:
-        """Part C, K-19: while a cleanup job holds a resource, no new job may name it, at submit."""
-        for other in self.state.jobs.values():
-            if other.klass != "cleanup" or other.status in TERMINAL:
+    def _refuse_registered(self, spec: dict[str, Any]) -> None:
+        """K-48' no reuse: a registered copy, held or released, is never leased by another job. A job
+        whose leases equal or overlap a registered copy's path is refused, at submit and again at launch,
+        so no third job can ever claim a released copy."""
+        for _copy_id, copy in sorted(self.state.copies.items()):
+            if copy["creator"] == spec["job_id"]:
                 continue
-            clash = conflicts(other.leases(), [(str(p), str(m)) for p, m in spec["leases"]])
-            if clash:
-                raise SpecError(f"{clash[0][1]} is leased by cleanup job {other.job_id}")
+            for path, _mode in spec["leases"]:
+                if overlaps(canonical(str(copy["path"])), str(path)):
+                    raise SpecError(f"path is a registered copy of job {copy['creator']}: {path}")
 
-    def _cleanup_leases(self, copies: list[str]) -> list[list[str]]:
-        leases = []
-        for copy_id in copies:
-            copy = self.state.copies.get(copy_id)
-            if copy is None or copy.get("state") == "removed":
-                raise SpecError(f"copy {copy_id!r} is not a registered copy")
-            owner = self.state.jobs.get(int(copy["job_id"]))
-            if owner is not None and owner.status not in TERMINAL:
-                raise SpecError(f"copy {copy_id!r} belongs to job {owner.job_id}, which is {owner.status}")
-            creator = self.state.jobs.get(int(copy["creator"]))
-            if creator is not None and creator.retain:
-                raise SpecError(
-                    f"copy {copy_id!r} is retained by eligible evidence job {creator.job_id} (K-18)"
-                )
-            leases.append([copy["path"], "exclusive"])
-        return leases
+    def _copies(self) -> list[dict[str, Any]]:
+        """K-48'': every registered copy with its creator, state and path; `, absent` when removed by hand."""
+        listed = []
+        for copy_id, copy in sorted(self.state.copies.items()):
+            state = self.state.copy_state(copy_id)
+            if state != "held" and not os.path.lexists(str(copy["path"])):
+                state += ", absent"
+            listed.append({"copy": copy_id, "creator": copy["creator"], "state": state, "path": copy["path"]})
+        return listed
 
     def _status(self, request: dict[str, Any]) -> dict[str, Any]:
         decision = decide(self.state, self.policy, self.host.free_memory_bytes(), self.host.monotonic())
@@ -651,6 +673,7 @@ class Broker:
                     "evidence": "eligible" if job.eligible else f"not-eligible({job.reason or job.status})",
                     "waits": decision.waits.get(job.job_id),
                     "retain": job.retain,
+                    "end": job.proof,
                     "log": job.spec.get("log"),
                 }
             )
@@ -660,6 +683,7 @@ class Broker:
             "generation": self.generation,
             "policy_version": self.state.policy_version,
             "jobs": jobs,
+            "copies": self._copies(),
         }
 
     def _cancel(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -822,12 +846,16 @@ class Broker:
         action = challenge["action"]
         if action == "release":
             job_id = challenge["scope"]["job_id"]
+            # K-23, K-48'': the confirmation is the end's provenance, never machine proof, and never eligible.
+            # Its copy lease is released in this same transition, to no other job.
             self._record(
                 "ended",
                 job_id=job_id,
-                outcome="human-confirmed",
+                outcome=HUMAN_CONFIRMED,
                 eligible=False,
                 reason=f"released by challenge {challenge['challenge_id']}",
+                proof=HUMAN_CONFIRMED,
+                override={"challenge_id": challenge["challenge_id"], "generation": self.generation},
             )
             return {"ok": True, "applied": f"job {job_id} ended(human-confirmed), not-eligible"}
         if action == "policy-set":
@@ -855,10 +883,6 @@ class Broker:
 
     def _check_active(self) -> None:
         for job in list(self.state.active()):
-            if job.klass == "cleanup":
-                if job.status == "running":
-                    self._cleanup_step(job)
-                continue
             if job.status == "launching" or not job.extent_known:
                 continue  # unknown extent: only inspected proof by repair, or an Owner release, resolves it
             workload = self._workload(job.spec, job.runner if job.status == "uncertain" else None)
@@ -871,9 +895,7 @@ class Broker:
             if workload:
                 if job.status == "running":
                     alive = (
-                        self.host.process_alive(
-                            ProcessIdentity(int(job.runner["pid"]), int(job.runner["start"]))
-                        )
+                        self.host.process_alive(ProcessIdentity.from_record(job.runner))
                         if job.runner
                         else None
                     )
@@ -895,6 +917,7 @@ class Broker:
                 outcome="unknown-outcome",
                 eligible=False,
                 reason="workload proven ended after uncertainty",
+                proof=INSPECTED,
             )
             return
         result = self._read_result(job.job_id)
@@ -905,6 +928,7 @@ class Broker:
                 outcome="unknown-outcome",
                 eligible=False,
                 reason="no readable runner result",
+                proof=INSPECTED,
             )
             return
         passed = result.get("exit") == 0 and result.get("gate_end") == 0
@@ -927,6 +951,7 @@ class Broker:
             reason=reason,
             retain=eligible,
             exit=result.get("exit"),
+            proof=INSPECTED,
         )
 
     def _read_result(self, job_id: int) -> dict[str, Any] | None:
@@ -948,9 +973,6 @@ class Broker:
 
     def _launch(self, job: Job) -> None:
         self._record("launching", job_id=job.job_id)
-        if job.klass == "cleanup":
-            self._record("running", job_id=job.job_id, runner=None, group=None)
-            return
         assert self.policy is not None
         try:
             rebuilt = build_spec(
@@ -960,6 +982,7 @@ class Broker:
                 job.job_id,
                 self.host.pane(str(job.spec["submitter"]["pane"])),
             )
+            self._refuse_registered(rebuilt)
         except SpecError as exc:
             self._record("refused", job_id=job.job_id, reason=f"refused at launch: {exc}")
             return
@@ -999,9 +1022,12 @@ class Broker:
             ),
         )
         fsops.mkdir([Path(r) for r in job.spec["roots"]], Path(str(job.spec["tmp"])))
-        env = dict(
-            job.spec["env"]
-        )  # the frozen effective environment only (B-10, B-14); nothing inherited later
+        try:
+            proofs = self._prove_resources(job)
+        except Unproven as exc:  # nothing is cleaned to make a proof pass; the entry is reported
+            self._record("refused", job_id=job.job_id, reason=f"launch proof failed (K-42a'): {exc}")
+            return
+        env = dict(job.spec["env"])  # the frozen effective environment only (B-10, B-14, K-42)
         env["MINION_JOB"] = job.spec["job_label"]
         env["MINION_JOB_GROUP"] = job.spec["group"]
         try:
@@ -1015,7 +1041,7 @@ class Broker:
             )
         except OSError as exc:
             stray = getattr(exc, "stray", None)
-            runner = {"pid": stray.pid, "start": stray.start} if stray is not None else None
+            runner = stray.as_record() if stray is not None else None
             started = self._workload(job.spec, runner)
             exists = self.host.group_exists(job.spec["group"])
             if runner is not None:
@@ -1039,16 +1065,43 @@ class Broker:
         self._record(
             "running",
             job_id=job.job_id,
-            runner={"pid": spawned.runner.pid, "start": spawned.runner.start},
+            runner=spawned.runner.as_record(),
             group=spawned.group,
             freshness=freshness,
+            proofs=[proof.as_record() for proof in proofs],
         )
+
+    def _writable_resources(self, job: Job) -> list[tuple[str, str]]:
+        """K-42a': every writable directory resource the job receives, as (kind, path)."""
+        spec = job.spec
+        found = [("working folder", str(spec["workdir"])), ("target", str(spec["target"]["path"]))]
+        found += [("cache", str(path)) for path in spec["caches"]]
+        found += [("temporary folder", str(spec["tmp"])), ("log directory", str(spec["log_dir"]))]
+        return found
+
+    def _prove_resources(self, job: Job) -> list[TreeProof]:
+        """K-42a', immediately before spawning: the ancestor proof and a complete no-follow walk of every
+        writable directory resource. Raises `Unproven` naming the resource and the offending entry."""
+        roots = [Path(r) for r in job.spec["roots"]]
+        proofs = []
+        for kind, path in self._writable_resources(job):
+            try:
+                proofs.append(prove_tree(roots, Path(path)))
+            except Unproven as exc:
+                raise Unproven(f"{kind} {exc}") from None
+        return proofs
 
     def _prepare(self, job: Job) -> str:
         """Preparation under the job's exclusive leases. Returns the freshness method it applied
-        (K-12a, B-12)."""
+        (K-12a, B-12). Every job gets a working folder it alone leases (K-42): a fresh folder for a
+        build, and the execution worktree for evidence and control."""
         roots = [Path(r) for r in job.spec["roots"]]
+        workdir = Path(str(job.spec["workdir"]))
+        assert_inside(roots, workdir)
+        if os.path.lexists(workdir):
+            raise ValueError(f"working folder {workdir} already exists")
         if job.klass == "build":
+            fsops.mkdir(roots, workdir)
             touched = 0
             checkout = Path(str(job.spec["checkout"]))
             for path in files(checkout):
@@ -1059,10 +1112,6 @@ class Broker:
                     fsops.utime(roots, path)
                     touched += 1
             return f"touch: {touched} workspace-member source files"
-        workdir = Path(str(job.spec["workdir"]))
-        assert_inside(roots, workdir)
-        if os.path.lexists(workdir):
-            raise ValueError(f"execution copy {workdir} already exists")
         self.git.add_worktree(Path(str(job.spec["checkout"])), workdir, str(job.spec["sha"]))
         manifest = sorted(entry.path.relative_to(workdir).as_posix() for entry in entries(workdir))
         copy_id = str(job.spec["job_label"])
@@ -1077,165 +1126,16 @@ class Broker:
             raise ValueError("fresh copy does not match the requested SHA or is not clean")
         return f"fresh copy at {job.spec['sha']}"
 
-    # == cleanup (K-17 to K-19, K-39) =======================================================================
 
-    def _cleanup_step(self, job: Job) -> None:
-        """Part C and K-17 to K-19. The full predicate conjunction is evaluated at every destructive
-        boundary: before the first batch, and again before each later one. A dry run (the default)
-        evaluates it, writes the report and removes nothing."""
-        refusal = self._cleanup_predicates(job)
-        if refusal:
-            self.cleanup_progress.pop(job.job_id, None)
-            self._record("ended", job_id=job.job_id, outcome="failed", eligible=False, reason=refusal)
-            return
-        todo = self.cleanup_progress.get(job.job_id)
-        if todo is None:
-            todo = []
-            for copy_id in job.spec["copies"]:
-                root = Path(self.state.copies[copy_id]["path"])
-                if os.path.lexists(root):
-                    todo += [(copy_id, str(entry.path)) for entry in entries(root, bottom_up=True)]
-                    todo.append((copy_id, str(root)))
-            if not job.spec.get("apply"):
-                report = self.root / layout.JOBS / str(job.job_id) / "report"
-                fsops.mkdir([self.root], report.parent)
-                lines = [f"would remove {path}" for _copy, path in todo] or ["nothing to remove"]
-                fsops.write_new([self.root], report, ("\n".join(lines) + "\n").encode("utf-8"))
-                self._record(
-                    "ended",
-                    job_id=job.job_id,
-                    outcome="dry-run",
-                    eligible=False,
-                    reason=f"dry run: {len(todo)} entries would be removed; report {report}",
-                )
-                return
-            for copy_id in job.spec["copies"]:
-                self._record("lease-transfer", copy_id=copy_id, to_job=job.job_id)
-            self.cleanup_progress[job.job_id] = todo
-        roots = [Path(r) for r in job.spec["roots"]]
-        done = 0
-        while todo and done < CLEANUP_BATCH:
-            copy_id, text = todo[0]
-            path = Path(text)
-            copy_root = Path(self.state.copies[copy_id]["path"])
-            relative = "." if path == copy_root else path.relative_to(copy_root).as_posix()
-            seq = len(self.markers.names("cleanup", str(job.job_id))) + 1
-            self.markers.publish(
-                "cleanup",
-                (str(job.job_id), f"{seq:08d}"),
-                {"copy_id": copy_id, "path": relative},
-                self._seq(),
-            )
-            entry = classify(path)
-            if entry.is_dir or entry.link_is_dir:
-                fsops.rmdir(roots, path)
-            else:
-                fsops.unlink(roots, path)
-            todo.pop(0)
-            done += 1
-        if todo:
-            return
-        for copy_id in job.spec["copies"]:
-            self._record("copy-state", copy_id=copy_id, state="removed")
-            creator = self.state.jobs.get(int(self.state.copies[copy_id]["creator"]))
-            if creator is not None and creator.spec.get("checkout"):
-                self.git.prune(Path(str(creator.spec["checkout"])))
-        self._record(
-            "ended",
-            job_id=job.job_id,
-            outcome="passed",
-            eligible=False,
-            reason="cleanup jobs are never evidence",
-        )
-        self.cleanup_progress.pop(job.job_id, None)
-
-    def _cleanup_predicates(self, job: Job) -> str | None:
-        """The Part C conjunction for every copy, with the K-18 reference set. Anything that cannot be
-        established refuses. Never an empty reference set by default."""
-        try:
-            profile = yaml.safe_load(Path(str(job.spec["profile"])).read_text(encoding="utf-8")) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            return f"profile unreadable at the boundary: {exc}"
-        queue_cfg = profile.get("build_queue") or {}
-        references = queue_cfg.get("cleanup_references")
-        if not isinstance(references, dict) or not all(
-            k in references for k in ("work_packages", "incidents", "authority_cache")
-        ):
-            return (
-                "build_queue.cleanup_references must declare work_packages, incidents and "
-                "authority_cache (K-18)"
-            )
-        protected = [
-            canonical(str(t.get("path", "")))
-            for t in (queue_cfg.get("targets") or {}).values()
-            if isinstance(t, dict)
-        ]
-        protected += [canonical(str(p)) for p in (queue_cfg.get("caches") or {}).values()]
-        protected.append(canonical(self.root))
-        texts: list[tuple[str, str]] = []
-        command = references["work_packages"]
-        if not isinstance(command, list) or not command or not all(isinstance(a, str) for a in command):
-            return "cleanup_references.work_packages must be a command (argv list)"
-        try:
-            ran = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return f"open work package states unreadable: {exc}"
-        if ran.returncode != 0:
-            return f"open work package states unreadable: exit {ran.returncode}"
-        texts.append(("open work packages", ran.stdout))
-        for kind in ("incidents", "authority_cache"):
-            sources = references[kind]
-            if not isinstance(sources, list) or not sources:
-                return f"cleanup_references.{kind} must list at least one path"
-            for source in sources:
-                content = _read_all(Path(str(source)))
-                if content is None:
-                    return f"reference source unreadable: {source}"
-                texts.append((str(source), content))
-        for copy_id in job.spec["copies"]:
-            copy = self.state.copies[copy_id]
-            path = str(copy["path"])
-            canon = canonical(path)
-            if any(
-                canon == p or canon.startswith(p + os.sep) or p.startswith(canon + os.sep) for p in protected
-            ):
-                return f"copy {copy_id} overlaps a protected store (target, cache or the queue)"
-            for other in self.state.jobs.values():
-                if other.job_id == job.job_id or other.status in TERMINAL:
-                    continue
-                for lease_path, _mode in other.leases():
-                    if (
-                        lease_path == path
-                        or lease_path.startswith(path + os.sep)
-                        or path.startswith(lease_path + os.sep)
-                    ):
-                        return f"copy {copy_id} is referenced by job {other.job_id} ({other.status})"
-            creator = self.state.jobs.get(int(copy["creator"]))
-            if creator is not None and creator.retain:
-                return f"copy {copy_id} is retained by job {creator.job_id}"
-            for where, text in texts:
-                if path in text or canon in text.lower():
-                    return f"copy {copy_id} is referenced in {where}"
-            if copy.get("state") == "registered" and os.path.lexists(path):
-                clean = self.git.clean(Path(path))
-                if clean is not True:
-                    return f"copy {copy_id} is not a clean worktree (status {clean})"
-                unpushed = self.git.unpushed(Path(path))
-                if unpushed is None:
-                    return f"copy {copy_id}: remote reachability unknown"
-                if unpushed:
-                    return f"copy {copy_id} has {len(unpushed)} commit(s) not reachable from a remote ref"
+def _manifest_problem(root: Path, manifest: list[str]) -> str | None:
+    """K-39 without cleanup: an existing copy that lacks an entry of its manifest is damaged. A copy that
+    is absent as a whole is not damage; it was removed by hand (K-48'', W-107b)."""
+    if not os.path.lexists(root):
         return None
-
-
-def _read_all(source: Path) -> str | None:
-    """All text under `source` (a file or a folder, never through a link); None if anything cannot be
-    read (K-18: unreadable means refuse, never an empty reference set)."""
-    try:
-        targets = list(files(source)) if source.is_dir() else [source]
-        return "\n".join(path.read_text(encoding="utf-8", errors="replace") for path in targets)
-    except OSError:
-        return None
+    for relative in manifest:
+        if not os.path.lexists(root / relative):
+            return f"manifest entry {relative} is missing"
+    return None
 
 
 __all__ = ["Broker", "BrokerRefused", "Contained", "StartReport"]

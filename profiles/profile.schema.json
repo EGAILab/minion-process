@@ -19,6 +19,48 @@
       "items": {
         "$ref": "#/$defs/text"
       }
+    },
+    "slot": {
+      "description": "A declared path slot (K-42): a template whose placeholder is bound by the kit, with the access the tool needs.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot",
+        "access"
+      ],
+      "properties": {
+        "slot": {
+          "$ref": "#/$defs/text"
+        },
+        "access": {
+          "enum": [
+            "read",
+            "write"
+          ]
+        }
+      }
+    },
+    "argOrSlot": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/text"
+        },
+        {
+          "$ref": "#/$defs/slot"
+        }
+      ]
+    },
+    "resourcePath": {
+      "description": "A leased resource path: a slot value may not carry '=', ';', a quote, a backtick or a control character (K-42, W-98a).",
+      "allOf": [
+        {
+          "$ref": "#/$defs/text"
+        },
+        {
+          "type": "string",
+          "pattern": "^[^=;\"'`\\u0000-\\u001f\\u007f]*$"
+        }
+      ]
     }
   },
   "type": "object",
@@ -358,13 +400,13 @@
                 "type": "array",
                 "minItems": 1,
                 "items": {
-                  "$ref": "#/$defs/text"
+                  "$ref": "#/$defs/argOrSlot"
                 }
               },
               "env": {
                 "type": "object",
                 "additionalProperties": {
-                  "$ref": "#/$defs/text"
+                  "$ref": "#/$defs/argOrSlot"
                 }
               },
               "target_env": {
@@ -374,7 +416,25 @@
                 "$ref": "#/$defs/textList"
               },
               "container": {
-                "type": "boolean"
+                "description": "false, or a container launcher with the container paths its mount slots and literals may use.",
+                "oneOf": [
+                  {
+                    "const": false
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "paths"
+                    ],
+                    "properties": {
+                      "paths": {
+                        "$ref": "#/$defs/textList",
+                        "minItems": 1
+                      }
+                    }
+                  }
+                ]
               },
               "cache_env": {
                 "type": "object",
@@ -410,10 +470,10 @@
           "$ref": "#/$defs/text"
         },
         "exec_root": {
-          "$ref": "#/$defs/text"
+          "$ref": "#/$defs/resourcePath"
         },
         "log_root": {
-          "$ref": "#/$defs/text"
+          "$ref": "#/$defs/resourcePath"
         },
         "targets": {
           "type": "object",
@@ -427,7 +487,7 @@
             ],
             "properties": {
               "path": {
-                "$ref": "#/$defs/text"
+                "$ref": "#/$defs/resourcePath"
               },
               "kind": {
                 "enum": [
@@ -445,43 +505,11 @@
         "caches": {
           "type": "object",
           "additionalProperties": {
-            "$ref": "#/$defs/text"
+            "$ref": "#/$defs/resourcePath"
           }
         },
         "inherit_env": {
           "$ref": "#/$defs/textList"
-        },
-        "cleanup_references": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "work_packages",
-            "incidents",
-            "authority_cache"
-          ],
-          "properties": {
-            "work_packages": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "$ref": "#/$defs/text"
-              }
-            },
-            "incidents": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "$ref": "#/$defs/text"
-              }
-            },
-            "authority_cache": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "$ref": "#/$defs/text"
-              }
-            }
-          }
         }
       }
     },
