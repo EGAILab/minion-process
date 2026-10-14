@@ -82,15 +82,25 @@ def test_w66_w67_c13_confirmation_channel(tmp_path: Path) -> None:
     w = make_world(tmp_path)
     challenge = w.request({"type": "policy-set", "policy": policy_dict(w.root, version=2, limit=1)})
     code = challenge["code"]
-    for prompt in (f"Codex w1:p2: CONFIRM QUEUE {code}", f"CONFIRM QUEUE {code} please", f"CONFIRM QUEUE {code[:7]}", "hello"):
+    for prompt in (
+        f"Codex w1:p2: CONFIRM QUEUE {code}",
+        f"CONFIRM QUEUE {code} please",
+        f"CONFIRM QUEUE {code[:7]}",
+        "hello",
+    ):
         assert confirm.handle({"hook_event_name": "UserPromptSubmit", "prompt": prompt}, w.queue) is None
-    assert confirm.handle({"hook_event_name": "PreToolUse", "prompt": f"CONFIRM QUEUE {code}"}, w.queue) is None
+    assert (
+        confirm.handle({"hook_event_name": "PreToolUse", "prompt": f"CONFIRM QUEUE {code}"}, w.queue) is None
+    )
     # C-13: a client verb cannot produce a hook confirmation, and the broker refuses any other origin
     with pytest.raises(ValueError, match="cannot send"):
         client.put(w.queue, {"type": "hook-confirm", "code": code})
     forged = client.put(w.queue, {"type": "hook-confirm", "code": code, "origin": "agent"}, _type_check=False)
     w.broker.step()
-    assert "only from the Owner's chat hook" in decode_single((w.queue / "outbox" / f"{forged}.res").read_bytes())["error"]
+    assert (
+        "only from the Owner's chat hook"
+        in decode_single((w.queue / "outbox" / f"{forged}.res").read_bytes())["error"]
+    )
     assert w.broker.policy is not None and w.broker.policy.limit == 2  # unchanged
     assert w.confirm("0" * 8)["error"] == "no challenge for that code"
     assert w.confirm(code)["ok"] and w.broker.policy.limit == 1  # W-66: exactly the bound effect
@@ -113,15 +123,25 @@ def test_expired_and_stale_generation_challenges(tmp_path: Path) -> None:
 def test_jobspec_refusals(tmp_path: Path) -> None:
     w = make_world(tmp_path)
     assert "unknown class" in w.request({"type": "submit", "class": "weird", "submitter": {}})["error"]
-    assert "profile unreadable" in w.request({"type": "submit", "class": "build", "profile": str(tmp_path / "none.yaml")})["error"]
+    assert (
+        "profile unreadable"
+        in w.request({"type": "submit", "class": "build", "profile": str(tmp_path / "none.yaml")})["error"]
+    )
     assert "target 'missing'" in w.submit(target="missing")["error"]
     assert "only a controls target" in w.submit("control", "gate", sha=SHA)["error"]
     assert "never use a controls target" in w.submit("build", "controls")["error"]
-    assert "belongs to claude, not codex" in w.submit("build", "reviewer", session="s2", pane="w1:p2")["error"]  # W-16
+    assert (
+        "belongs to claude, not codex" in w.submit("build", "reviewer", session="s2", pane="w1:p2")["error"]
+    )  # W-16
     assert "need --sha" in w.submit("evidence", "gate")["error"]
     assert "does not match its pane" in w.submit(session="forged")["error"]
     assert "cannot be read" in w.submit(pane="w9:p9")["error"]
-    assert "required" in w.request({"type": "submit", "class": "build", "profile": str(w.profile), "submitter": {}})["error"]
+    assert (
+        "required"
+        in w.request({"type": "submit", "class": "build", "profile": str(w.profile), "submitter": {}})[
+            "error"
+        ]
+    )
     outside = w.submit(checkout=str(tmp_path / "elsewhere"))
     assert "not contained" in outside["error"]  # W-24
     duplicate = client.put(w.queue, {"type": "submit", "class": "weird", "request_id": "fixed"})
@@ -190,8 +210,21 @@ def test_submitter_session_rechecked_at_launch(tmp_path: Path) -> None:
 def test_build_spec_paths_and_mount_forms(tmp_path: Path) -> None:
     w = make_world(tmp_path)
     assert w.broker.policy is not None
-    _edit_profile(w, lambda d: d["gates"]["rust"]["queue"].update(argv=["docker", "-v", "{target}:/t", "--env=X={log}"], env={"A": "{workdir}"}))
-    request = {"class": "evidence", "profile": str(w.profile), "launcher": "rust", "target": "gate", "checkout": str(w.root / "repo"), "sha": SHA, "submitter": {"pane": "w1:p1", "session": "s1"}}
+    _edit_profile(
+        w,
+        lambda d: d["gates"]["rust"]["queue"].update(
+            argv=["docker", "-v", "{target}:/t", "--env=X={log}"], env={"A": "{workdir}"}
+        ),
+    )
+    request = {
+        "class": "evidence",
+        "profile": str(w.profile),
+        "launcher": "rust",
+        "target": "gate",
+        "checkout": str(w.root / "repo"),
+        "sha": SHA,
+        "submitter": {"pane": "w1:p1", "session": "s1"},
+    }
     spec = build_spec(request, w.broker.policy, "q", 5, pane_info("s1"))
     assert spec["argv"][2].endswith(":/t") and spec["env"]["A"].endswith("q-job-5")
     _edit_profile(w, lambda d: d["gates"]["rust"]["queue"].update(argv=["docker", "-v", "C:\\Windows:/w"]))
@@ -230,7 +263,12 @@ def test_w9_w15_natural_end_and_never_evidence(tmp_path: Path) -> None:
     result(w, job_id, 0, 0)
     finish(w, job_id)
     job = w.job(job_id)
-    assert job.status == "ended" and job.outcome == "passed" and not job.eligible and "never evidence" in str(job.reason)
+    assert (
+        job.status == "ended"
+        and job.outcome == "passed"
+        and not job.eligible
+        and "never evidence" in str(job.reason)
+    )
 
 
 def test_exit_and_gate_end_must_agree(tmp_path: Path) -> None:
@@ -255,7 +293,9 @@ def test_evidence_preparation_failures_refuse_before_any_workload(tmp_path: Path
     w = make_world(tmp_path)
     from minion_process.hostqueue.resources import canonical
 
-    w.git.heads[canonical(w.root / "exec" / "host-test-job-1")] = SHA2  # the fresh copy is at the wrong commit
+    w.git.heads[canonical(w.root / "exec" / "host-test-job-1")] = (
+        SHA2  # the fresh copy is at the wrong commit
+    )
     job_id = w.submit("evidence", sha=SHA)["job_id"]
     assert w.job(job_id).status == "refused" and "fresh copy" in str(w.job(job_id).reason)
     w.git.add_error = OSError("worktree add failed")
@@ -279,7 +319,9 @@ def test_w8_c2_runner_dead_while_workload_lives(tmp_path: Path) -> None:
     w = make_world(tmp_path)
     job_id = w.submit()["job_id"]
     spawned = w.host.spawned[-1]
-    w.host.processes[(spawned["runner"].pid, spawned["runner"].start)] = False  # runner gone, group still active
+    w.host.processes[(spawned["runner"].pid, spawned["runner"].start)] = (
+        False  # runner gone, group still active
+    )
     w.broker.step()
     job = w.job(job_id)
     assert job.status == "uncertain"  # C-2: a runner-alive check alone would have released the resources
@@ -373,9 +415,15 @@ def test_status_cancel_unretain(tmp_path: Path) -> None:
     job_id = w.submit()["job_id"]
     status = w.request({"type": "status", "job_id": job_id})
     assert status["jobs"][0]["waits"].startswith("memory")
-    assert "submitting session" in w.request({"type": "cancel", "job_id": job_id, "submitter": {"session": "other"}})["error"]
+    assert (
+        "submitting session"
+        in w.request({"type": "cancel", "job_id": job_id, "submitter": {"session": "other"}})["error"]
+    )
     assert w.request({"type": "cancel", "job_id": job_id, "submitter": {"session": "s1"}})["ok"]
-    assert "only a submitted" in w.request({"type": "cancel", "job_id": job_id, "submitter": {"session": "s1"}})["error"]
+    assert (
+        "only a submitted"
+        in w.request({"type": "cancel", "job_id": job_id, "submitter": {"session": "s1"}})["error"]
+    )
     assert "not retained" in w.request({"type": "unretain", "job_id": job_id})["error"]
     w.host.memory = 64 * 1024**3
     ev = w.submit("evidence", sha=SHA)["job_id"]
@@ -384,7 +432,9 @@ def test_status_cancel_unretain(tmp_path: Path) -> None:
     assert w.request({"type": "unretain", "job_id": ev})["ok"]
     odd = client.put(w.queue, {"type": "nonsense"}, _type_check=False)
     w.broker.step()
-    assert decode_single((w.queue / "outbox" / f"{odd}.res").read_bytes())["error"].startswith("unknown request type")
+    assert decode_single((w.queue / "outbox" / f"{odd}.res").read_bytes())["error"].startswith(
+        "unknown request type"
+    )
 
 
 def test_w20_malformed_requests_are_rejected_alone(tmp_path: Path) -> None:
@@ -394,7 +444,9 @@ def test_w20_malformed_requests_are_rejected_alone(tmp_path: Path) -> None:
     (w.queue / "inbox" / "note.txt").write_text("ignored")
     good = w.submit()
     assert good["ok"]
-    assert (w.queue / "rejected" / "bad.req").exists() and "unreadable" in (w.queue / "rejected" / "bad.reason").read_text()
+    assert (w.queue / "rejected" / "bad.req").exists() and "unreadable" in (
+        w.queue / "rejected" / "bad.reason"
+    ).read_text()
     assert "does not match" in (w.queue / "rejected" / "mismatch.reason").read_text()
 
 
@@ -408,8 +460,12 @@ def test_w41_w85_w86_render_attempts(tmp_path: Path) -> None:
     assert first["attempt"] == 1 and "may-have-printed" in first["delivery"]
     assert "already rendered" in w.request({"type": "render", "text": "hand-off"})["error"]
     w.restart()
-    assert "already rendered" in w.request({"type": "render", "text": "hand-off"})["error"]  # W-41 across restart
-    assert "latest attempt" in w.request({"type": "undelivered", "hash": first["hash"], "attempt": 2})["error"]
+    assert (
+        "already rendered" in w.request({"type": "render", "text": "hand-off"})["error"]
+    )  # W-41 across restart
+    assert (
+        "latest attempt" in w.request({"type": "undelivered", "hash": first["hash"], "attempt": 2})["error"]
+    )
     assert w.request({"type": "undelivered", "hash": first["hash"], "attempt": 1})["ok"]
     assert w.request({"type": "undelivered", "hash": first["hash"], "attempt": 1})["duplicate"]
     second = w.request({"type": "render", "text": "hand-off"})

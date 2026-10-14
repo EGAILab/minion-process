@@ -2,7 +2,47 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
-## 0.3.1 - lesson: shared build caches and mtime freshness (unreleased)
+## 0.4.0 — P3b: host build queue, session start, cleanup, dispatch rendering, fault-fired check (2026-10-14)
+
+Coordination `minion-agent#223` (PROC-KIT-P3B, process / governing, `CP-1`, `CP-5`, `CP-6`). Contract agreed
+in convergence episode `CE-PROC-P3B-01` (Codex round 6); texts in `docs/p3b/`. Owner decisions: window
+ownership moves to a host queue (`minion-agent#209` issuecomment-6138907446); the queue folder; 2 jobs /
+16 GiB / 3 minutes (`#223`); `CONFIRM QUEUE` through the Claude chat hook (`#223`).
+
+- `minion_process/hostqueue/`:
+  - **Broker:** single instance via the OS mutex. It replays the journal on every start. Clients write one
+    immutable request file each.
+  - **Journal:** checksummed, commit-marked, gap-free records. Every anomaly is ambiguous.
+  - **Effect markers:** write-ahead, exclusive at the final name, never overwritten. Recovery reconciles
+    the journal with them.
+  - **Admission:** evidence drains the host; bounded bypass on resources only; exact-byte memory floor
+    with start-up reservations. Launching and uncertain jobs keep their slot. Unknown-extent work blocks
+    the whole host.
+  - **Frozen inputs:** re-checked at launch, so any drift refuses the job. Resources are canonical paths
+    with overlap. Evidence runs on a fresh worktree of the exact SHA and controls on isolated copies. A
+    build gets its freshness touch under an exclusive lease, then shares the checkout.
+  - **End proof:** a job object plus labelled containers; the runner drains its job before writing its
+    result. Uncertain jobs hold their resources until proof or a confirmed release.
+  - **Overrides:** policy set, release, quarantine and resume each need a scope-bound, one-use, expiring
+    challenge confirmed by the Owner's `CONFIRM QUEUE <code>` (`hostqueue/confirm.py`, a `UserPromptSubmit`
+    hook).
+  - **Repair mode:** never admits. Quarantine keeps the original bytes. Placeholders hold the host for
+    effects whose footprint is unknown.
+  - **Cleanup class:** removes registered copies only, under a lease handed from the creator job, and
+    checks the reference set at the destructive boundary. No walk ever follows a link or junction.
+  - **Containment:** proved before every write, rename and delete.
+  - **`winos.py`:** the Windows host adapter (named mutex, process identity, job objects, memory, volume
+    type, write-through rename, docker and herdr queries).
+- `minion-process build broker|submit|status|wait|cancel|unretain|release|policy|repair|cleanup`,
+  `session start`, `faults check`, `dispatch --print` / `--mark-undelivered`.
+- `minion_process/faults.py`: fault-fired accounting for feasibility matrices and control recipes.
+- Profile: optional `build_queue` and per-gate `queue` (schema and validator, differential tests).
+- `WORKFLOW.md` §9.8 (host build queue), §11.17 (the kit renders but never sends), §12.2 (`session start`).
+- CI: a Windows job runs the full suite with the 100% coverage gate, because the host adapter is Windows
+  only. The Linux job runs lint, types and the tests.
+- Not in 0.4.0: automatic pane sending (deferred, K-4); the incident replay suite (P4).
+
+## 0.3.1 — lesson: shared build caches and mtime freshness (2026-10-13)
 
 Mechanical (CP-0) kit change from `EGAILab/minion-process#4`, proposed by the Minion-Agent consumer.
 

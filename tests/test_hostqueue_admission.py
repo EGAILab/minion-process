@@ -17,7 +17,9 @@ GIB = 1024**3
 
 
 def policy(**over: Any) -> policy_mod.Policy:
-    return policy_mod.parse({"policy_id": "p", "version": 1, **policy_mod.OWNER_DEFAULTS, "projects": {"proj": ["E:\\x"]}, **over})
+    return policy_mod.parse(
+        {"policy_id": "p", "version": 1, **policy_mod.OWNER_DEFAULTS, "projects": {"proj": ["E:\\x"]}, **over}
+    )
 
 
 class Q:
@@ -33,7 +35,11 @@ class Q:
 
     def job(self, klass: str, leases: list[list[str]] | None = None) -> int:
         job_id = self.state.next_job_id
-        spec = {"class": klass, "leases": leases if leases is not None else [[f"T{job_id}", "exclusive"]], "submitter": {}}
+        spec = {
+            "class": klass,
+            "leases": leases if leases is not None else [[f"T{job_id}", "exclusive"]],
+            "submitter": {},
+        }
         self.rec("accept", request_id=f"r{job_id}", job_id=job_id, spec=spec)
         return job_id
 
@@ -46,7 +52,12 @@ class Q:
 
 
 def test_owner_defaults_are_the_decided_values() -> None:
-    assert policy_mod.OWNER_DEFAULTS == {"limit": 2, "floor_bytes": 16 * GIB, "reservation_seconds": 180, "bypass_limit": 3}
+    assert policy_mod.OWNER_DEFAULTS == {
+        "limit": 2,
+        "floor_bytes": 16 * GIB,
+        "reservation_seconds": 180,
+        "bypass_limit": 3,
+    }
     p = policy()
     assert p.as_dict()["projects"] == {"proj": ["E:\\x"]}
 
@@ -77,7 +88,9 @@ def test_resources_overlap_by_canonical_path(tmp_path: Any) -> None:
     a = resources.canonical(tmp_path / "t")
     nested = resources.canonical(tmp_path / "t" / "inner")
     assert resources.overlaps(a, a) and resources.overlaps(a, nested) and resources.overlaps(nested, a)
-    assert not resources.overlaps(a, resources.canonical(tmp_path / "t2"))  # a prefix of the name is not a parent
+    assert not resources.overlaps(
+        a, resources.canonical(tmp_path / "t2")
+    )  # a prefix of the name is not a parent
     assert resources.conflicts([(a, "shared")], [(nested, "shared")]) == []
     assert resources.conflicts([(a, "shared")], [(nested, "exclusive")]) == [(a, nested)]
     alias = resources.canonical(str(tmp_path / "t") + os.sep)  # W-11: two spellings of one directory
@@ -240,7 +253,15 @@ def test_state_transitions_cover_every_record_kind() -> None:
     q.rec("launching", job_id=r)
     q.rec("refused", job_id=r, reason="drift")
     q.rec("broker-start", pid=1, start=1)
-    q.rec("challenge", challenge_id="c1", code_sha256="x", action="release", scope={}, effect="e", expires_mono=1.0)
+    q.rec(
+        "challenge",
+        challenge_id="c1",
+        code_sha256="x",
+        action="release",
+        scope={},
+        effect="e",
+        expires_mono=1.0,
+    )
     q.rec("confirmed", challenge_id="c1")
     q.rec("challenge-consumed", challenge_id="c2")
     q.rec("policy", version=1, challenge="c1")
@@ -268,7 +289,12 @@ def test_restart_holds_reservations_for_a_full_window() -> None:
 def test_build_lease_drops_to_shared_after_preparation() -> None:
     q = Q()
     j = q.state.next_job_id
-    spec = {"class": "build", "leases": [["CHK", "exclusive"], ["T", "exclusive"]], "downgrade_after_prepare": "CHK", "submitter": {}}
+    spec = {
+        "class": "build",
+        "leases": [["CHK", "exclusive"], ["T", "exclusive"]],
+        "downgrade_after_prepare": "CHK",
+        "submitter": {},
+    }
     q.rec("accept", request_id="r", job_id=j, spec=spec)
     q.rec("launching", job_id=j)
     assert ("CHK", "exclusive") in q.state.held_leases()

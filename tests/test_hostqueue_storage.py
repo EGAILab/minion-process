@@ -59,7 +59,9 @@ def test_payload_must_be_a_json_object() -> None:
 
 def test_next_valid_record_skips_damage() -> None:
     good = framing.encode({"seq": 2})
-    assert framing.next_valid_record(b"junk" + framing.MAGIC + b"broken" + good, 0) == len(b"junk" + framing.MAGIC + b"broken")
+    assert framing.next_valid_record(b"junk" + framing.MAGIC + b"broken" + good, 0) == len(
+        b"junk" + framing.MAGIC + b"broken"
+    )
     assert framing.next_valid_record(b"junk", 0) is None
 
 
@@ -176,7 +178,9 @@ def test_containment_drive_relative_and_driveless() -> None:
 def test_containment_lexical_and_links(tmp_path: Path) -> None:
     root = tmp_path / "root"
     (root / "a").mkdir(parents=True)
-    assert contain.assert_inside([root], root / "a" / "missing" / "deeper") == root / "a" / "missing" / "deeper"
+    assert (
+        contain.assert_inside([root], root / "a" / "missing" / "deeper") == root / "a" / "missing" / "deeper"
+    )
     with pytest.raises(contain.Contained, match="outside"):
         contain.assert_inside([root], tmp_path / "elsewhere")
     with pytest.raises(contain.Contained, match="outside"):

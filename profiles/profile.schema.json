@@ -4,24 +4,56 @@
   "title": "Minion-Process profile",
   "description": "The one project-specific process file. Validated offline by `minion-process profile validate`; `minion_process/profile.py` implements these rules and, in addition, the cross-field rules a JSON schema cannot express (its SUPPLEMENTAL_RULES): implementation_order: every language listed has an `implementer:<language>` agent; conformance: `support` entries are not also `families` entries. Strings must contain a non-whitespace character. tests/test_profile.py runs this schema and the Python validator differentially.",
   "$defs": {
-    "text": {"type": "string", "minLength": 1, "pattern": "\\S"},
-    "repo": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
-    "textList": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/text"}}
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "repo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "textList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/text"
+      }
+    }
   },
   "type": "object",
   "additionalProperties": false,
-  "required": ["kit", "project", "authority", "repos", "coordination", "agents", "delegation"],
+  "required": [
+    "kit",
+    "project",
+    "authority",
+    "repos",
+    "coordination",
+    "agents",
+    "delegation"
+  ],
   "properties": {
     "kit": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "source"],
+      "required": [
+        "version",
+        "source"
+      ],
       "properties": {
-        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
-        "source": {"$ref": "#/$defs/repo"}
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "source": {
+          "$ref": "#/$defs/repo"
+        }
       }
     },
-    "project": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "project": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
     "authority": {
       "description": "Semantic authority chain, highest first.",
       "type": "array",
@@ -29,14 +61,45 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind"],
-        "anyOf": [{"required": ["path"]}, {"required": ["pin"]}],
+        "required": [
+          "kind"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "path"
+            ]
+          },
+          {
+            "required": [
+              "pin"
+            ]
+          }
+        ],
         "properties": {
-          "kind": {"enum": ["source", "bundle", "manifest", "spec", "conformance", "design", "register"]},
-          "name": {"$ref": "#/$defs/text"},
-          "path": {"$ref": "#/$defs/text"},
-          "pin": {"$ref": "#/$defs/text"},
-          "verify": {"$ref": "#/$defs/text"}
+          "kind": {
+            "enum": [
+              "source",
+              "bundle",
+              "manifest",
+              "spec",
+              "conformance",
+              "design",
+              "register"
+            ]
+          },
+          "name": {
+            "$ref": "#/$defs/text"
+          },
+          "path": {
+            "$ref": "#/$defs/text"
+          },
+          "pin": {
+            "$ref": "#/$defs/text"
+          },
+          "verify": {
+            "$ref": "#/$defs/text"
+          }
         }
       }
     },
@@ -46,11 +109,20 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "default_branch"],
+        "required": [
+          "path",
+          "default_branch"
+        ],
         "properties": {
-          "path": {"$ref": "#/$defs/text"},
-          "default_branch": {"$ref": "#/$defs/text"},
-          "github": {"$ref": "#/$defs/repo"}
+          "path": {
+            "$ref": "#/$defs/text"
+          },
+          "default_branch": {
+            "$ref": "#/$defs/text"
+          },
+          "github": {
+            "$ref": "#/$defs/repo"
+          }
         }
       }
     },
@@ -58,25 +130,73 @@
       "description": "Every supplied locator is validated whichever backend is selected (PROC-KIT-P1-R002).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["backend"],
+      "required": [
+        "backend"
+      ],
       "properties": {
-        "backend": {"enum": ["github-issue", "state-file"]},
-        "repo": {"$ref": "#/$defs/repo"},
-        "path": {"$ref": "#/$defs/text"}
+        "backend": {
+          "enum": [
+            "github-issue",
+            "state-file"
+          ]
+        },
+        "repo": {
+          "$ref": "#/$defs/repo"
+        },
+        "path": {
+          "$ref": "#/$defs/text"
+        }
       },
       "allOf": [
-        {"if": {"properties": {"backend": {"const": "github-issue"}}}, "then": {"required": ["repo"]}},
-        {"if": {"properties": {"backend": {"const": "state-file"}}}, "then": {"required": ["path"]}}
+        {
+          "if": {
+            "properties": {
+              "backend": {
+                "const": "github-issue"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "repo"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "backend": {
+                "const": "state-file"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "path"
+            ]
+          }
+        }
       ]
     },
     "conformance": {
       "description": "The project's canonical behavior families and its support infrastructure (WORKFLOW.md section 9). Minion-Agent: families runtime, session, agent; support schema.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["families"],
+      "required": [
+        "families"
+      ],
       "properties": {
-        "families": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
-        "support": {"$ref": "#/$defs/textList"}
+        "families": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/text"
+          }
+        },
+        "support": {
+          "$ref": "#/$defs/textList"
+        }
       }
     },
     "agents": {
@@ -86,65 +206,282 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["roles", "harness"],
+        "required": [
+          "roles",
+          "harness"
+        ],
         "properties": {
           "roles": {
             "type": "array",
             "minItems": 1,
             "uniqueItems": true,
-            "items": {"type": "string", "pattern": "^(coordinator|shared-contract-owner|reviewer|implementer:[a-z][a-z0-9+-]*)$"}
+            "items": {
+              "type": "string",
+              "pattern": "^(coordinator|shared-contract-owner|reviewer|implementer:[a-z][a-z0-9+-]*)$"
+            }
           },
-          "harness": {"$ref": "#/$defs/text"},
-          "default_pane": {"$ref": "#/$defs/text"}
+          "harness": {
+            "$ref": "#/$defs/text"
+          },
+          "default_pane": {
+            "$ref": "#/$defs/text"
+          }
         }
       },
       "allOf": [
-        {"not": {"additionalProperties": {"properties": {"roles": {"not": {"contains": {"const": "coordinator"}}}}}}},
-        {"not": {"additionalProperties": {"properties": {"roles": {"not": {"contains": {"const": "reviewer"}}}}}}},
-        {"not": {"additionalProperties": {"properties": {"roles": {"not": {"contains": {"type": "string", "pattern": "^implementer:"}}}}}}},
-        {"not": {"additionalProperties": {"properties": {"roles": {"not": {"allOf": [
-          {"contains": {"const": "reviewer"}},
-          {"not": {"contains": {"const": "shared-contract-owner"}}}
-        ]}}}}}}
+        {
+          "not": {
+            "additionalProperties": {
+              "properties": {
+                "roles": {
+                  "not": {
+                    "contains": {
+                      "const": "coordinator"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "not": {
+            "additionalProperties": {
+              "properties": {
+                "roles": {
+                  "not": {
+                    "contains": {
+                      "const": "reviewer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "not": {
+            "additionalProperties": {
+              "properties": {
+                "roles": {
+                  "not": {
+                    "contains": {
+                      "type": "string",
+                      "pattern": "^implementer:"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "not": {
+            "additionalProperties": {
+              "properties": {
+                "roles": {
+                  "not": {
+                    "allOf": [
+                      {
+                        "contains": {
+                          "const": "reviewer"
+                        }
+                      },
+                      {
+                        "not": {
+                          "contains": {
+                            "const": "shared-contract-owner"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "taxonomy_aliases": {
       "type": "object",
-      "propertyNames": {"pattern": "^[A-Z][A-Z0-9_]*$"},
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Z0-9_]*$"
+      },
       "additionalProperties": {
-        "enum": ["AUTHORITY_BEHAVIOR_UNCERTAIN", "AUTHORITY_PARITY_DEFECT", "CONTRACT_ASSURANCE_DEFECT", "PARITY_NEUTRAL_HARDENING", "PARITY_CONSTRAINED_RISK"]
+        "enum": [
+          "AUTHORITY_BEHAVIOR_UNCERTAIN",
+          "AUTHORITY_PARITY_DEFECT",
+          "CONTRACT_ASSURANCE_DEFECT",
+          "PARITY_NEUTRAL_HARDENING",
+          "PARITY_CONSTRAINED_RISK"
+        ]
       }
     },
-    "hazard_families": {"$ref": "#/$defs/textList"},
+    "hazard_families": {
+      "$ref": "#/$defs/textList"
+    },
     "gates": {
       "type": "object",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["launcher", "tiers"],
+        "required": [
+          "launcher",
+          "tiers"
+        ],
         "properties": {
-          "launcher": {"$ref": "#/$defs/text"},
-          "tiers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["g0", "g1", "g2", "g3"]}}
+          "launcher": {
+            "$ref": "#/$defs/text"
+          },
+          "tiers": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "g0",
+                "g1",
+                "g2",
+                "g3"
+              ]
+            }
+          },
+          "queue": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "argv"
+            ],
+            "properties": {
+              "argv": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/text"
+                }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/$defs/text"
+                }
+              },
+              "target_env": {
+                "$ref": "#/$defs/textList"
+              },
+              "source_globs": {
+                "$ref": "#/$defs/textList"
+              },
+              "container": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "build_queue": {
+      "description": "Kit 0.4.0 host build queue (docs/p3b/): where the queue lives, the host policy this project expects, its execution and log roots, and its build targets.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "policy_id",
+        "project",
+        "exec_root",
+        "log_root",
+        "targets"
+      ],
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/text"
+        },
+        "policy_id": {
+          "$ref": "#/$defs/text"
+        },
+        "project": {
+          "$ref": "#/$defs/text"
+        },
+        "exec_root": {
+          "$ref": "#/$defs/text"
+        },
+        "log_root": {
+          "$ref": "#/$defs/text"
+        },
+        "targets": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "kind"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "#/$defs/text"
+              },
+              "kind": {
+                "enum": [
+                  "gate",
+                  "controls",
+                  "reviewer"
+                ]
+              },
+              "owner_agent": {
+                "$ref": "#/$defs/text"
+              }
+            }
+          }
+        },
+        "reference_sources": {
+          "$ref": "#/$defs/textList"
         }
       }
     },
     "delegation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source", "routing"],
+      "required": [
+        "source",
+        "routing"
+      ],
       "properties": {
-        "source": {"$ref": "#/$defs/text"},
-        "routing": {"type": "boolean"}
+        "source": {
+          "$ref": "#/$defs/text"
+        },
+        "routing": {
+          "type": "boolean"
+        }
       }
     },
-    "wp_kinds_enabled": {"type": "array", "uniqueItems": true, "items": {"enum": ["semantic", "delta", "process", "scoping", "status"]}},
+    "wp_kinds_enabled": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "semantic",
+          "delta",
+          "process",
+          "scoping",
+          "status"
+        ]
+      }
+    },
     "implementation_order": {
       "description": "Languages in the order the workflow's implementation states apply to them (first = the shared-contract side). Supplemental rule: each must have an implementer.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"type": "string", "pattern": "^[a-z][a-z0-9+-]*$"}
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9+-]*$"
+      }
     },
-    "environment": {"$ref": "#/$defs/text"}
+    "environment": {
+      "$ref": "#/$defs/text"
+    }
   }
 }

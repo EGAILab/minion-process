@@ -125,9 +125,10 @@ def _filetime(ft: _FILETIME) -> int:
 
 
 class WindowsHostOS:
-    def __init__(self, docker: str = "docker", herdr: str = "herdr") -> None:
-        if sys.platform != "win32":
+    def __init__(self, docker: str = "docker", herdr: str = "herdr", mutex_name: str = MUTEX_NAME) -> None:
+        if sys.platform != "win32":  # pragma: no cover - other platforms
             raise OSError("WindowsHostOS needs Windows")
+        self.mutex_name = mutex_name
         self.k32 = _k32()
         self.ntdll = ctypes.WinDLL("ntdll")
         self.docker = docker
@@ -137,7 +138,7 @@ class WindowsHostOS:
 
     # -- mutex ------------------------------------------------------------------------------------------
     def acquire_broker_mutex(self) -> MutexResult:
-        handle = self.k32.CreateMutexW(None, False, MUTEX_NAME)
+        handle = self.k32.CreateMutexW(None, False, self.mutex_name)
         if not handle:
             error = ctypes.get_last_error()
             return MutexResult(False, False, f"CreateMutexW failed with error {error}")

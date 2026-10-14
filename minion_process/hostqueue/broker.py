@@ -721,7 +721,10 @@ class Broker:
             if self.state.mode != "repair":
                 return {"ok": False, "error": "not in repair mode"}
             if self.generation_unknown:
-                return {"ok": False, "error": "the current journal generation is unknown; the queue folder needs the Owner"}
+                return {
+                    "ok": False,
+                    "error": "the current journal generation is unknown; the queue folder needs the Owner",
+                }
             effect = "quarantine the current journal and write a recovery generation"
         else:
             if self.state.mode != "repair" or self.journal is None or self.unsafe:

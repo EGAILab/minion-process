@@ -23,7 +23,7 @@ def _hold_and_drain() -> None:
     """On Windows, hold a handle to this process's own job object, then wait until this runner is the only
     live process left in it. Writing the result afterwards proves the job's processes drained. A missing job
     association (not under the broker, or not Windows) skips the wait; the broker then needs its own proof."""
-    if sys.platform != "win32":
+    if sys.platform != "win32":  # pragma: no cover - other platforms have no job objects
         return
     import ctypes
     from ctypes import wintypes

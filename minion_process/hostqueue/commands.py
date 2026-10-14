@@ -272,12 +272,21 @@ def session_start(profile_path: Path, agent: str, gh_issues: Any = None) -> dict
 
 
 def _queue_summary(queue: Path) -> tuple[dict[str, list[int]], list[str]]:
-    """Read-only replay of the current generation."""
-    names = Markers(queue, None, "reader").names("generation")  # type: ignore[arg-type]
+    """Read-only replay of the current generation. An unreadable generation marker or a missing journal
+    is unknown, never an empty queue (K-36)."""
+    markers = Markers(queue, None, "reader")  # type: ignore[arg-type]
+    names = markers.names("generation")
     if not names:
         return {"running": [], "waiting": [], "uncertain": []}, []
+    if not all(n.isdigit() for n in names):
+        raise ValueError("unexpected generation marker name")
     generation = max(int(n) for n in names)
-    replay = read_journal(layout.journal_path(queue, generation))
+    if not isinstance(markers.read("generation", str(generation)), dict):
+        raise ValueError(f"generation marker {generation} unreadable")
+    path = layout.journal_path(queue, generation)
+    if not path.exists():
+        raise ValueError(f"journal for generation {generation} missing")
+    replay = read_journal(path)
     if replay.anomaly is not None:
         raise ValueError(f"journal anomaly at {replay.anomaly.offset}: {replay.anomaly.reason}")
     state = QueueState()

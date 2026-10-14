@@ -32,12 +32,14 @@ TOP_OPTIONAL = (
     "taxonomy_aliases",
     "hazard_families",
     "gates",
+    "build_queue",
     "wp_kinds_enabled",
     "implementation_order",
     "environment",
 )
 AUTHORITY_KINDS = frozenset({"source", "bundle", "manifest", "spec", "conformance", "design", "register"})
 BACKENDS = frozenset({"github-issue", "state-file"})
+TARGET_KINDS = frozenset({"gate", "controls", "reviewer"})
 TAXONOMY = frozenset(
     {
         "AUTHORITY_BEHAVIOR_UNCERTAIN",
@@ -261,10 +263,61 @@ def _gates(c: _Check, value: Any) -> None:
     for name, raw in gates.items():
         path = f"gates.{name}"
         gate = c.mapping(raw, path)
-        if gate is None or not c.keys(gate, path, ("launcher", "tiers"), ()):
+        if gate is None or not c.keys(gate, path, ("launcher", "tiers"), ("queue",)):
             continue
         c.text(gate["launcher"], f"{path}.launcher")
         c.enum_list(gate["tiers"], f"{path}.tiers", TIERS, minimum=1)
+        if "queue" in gate:
+            _gate_queue(c, gate["queue"], f"{path}.queue")
+
+
+def _gate_queue(c: _Check, value: Any, path: str) -> None:
+    """A launcher the kit host queue can run (docs/p3b/, B-10, B-14)."""
+    queue = c.mapping(value, path)
+    if queue is None or not c.keys(
+        queue, path, ("argv",), ("env", "target_env", "source_globs", "container")
+    ):
+        return
+    argv = queue["argv"]
+    if not isinstance(argv, list):
+        c.error(f"{path}.argv", f"must be a list, got {type(argv).__name__}")
+    elif not argv:
+        c.error(f"{path}.argv", "needs at least 1 item(s)")
+    else:
+        for i, item in enumerate(argv):
+            c.text(item, f"{path}.argv[{i}]")
+    if "env" in queue:
+        env = c.mapping(queue["env"], f"{path}.env")
+        for key, item in (env or {}).items():
+            c.text(item, f"{path}.env.{key}")
+    for key in ("target_env", "source_globs"):
+        if key in queue:
+            c.string_list(queue[key], f"{path}.{key}")
+    if "container" in queue and not isinstance(queue["container"], bool):
+        c.error(f"{path}.container", "must be true or false")
+
+
+def _build_queue(c: _Check, value: Any) -> None:
+    queue = c.mapping(value, "build_queue")
+    required = ("state", "policy_id", "project", "exec_root", "log_root", "targets")
+    if queue is None or not c.keys(queue, "build_queue", required, ("reference_sources",)):
+        return
+    for key in required[:-1]:
+        c.text(queue[key], f"build_queue.{key}")
+    targets = c.mapping(queue["targets"], "build_queue.targets")
+    if targets is not None and not targets:
+        c.error("build_queue.targets", "needs at least one target")
+    for name, raw in (targets or {}).items():
+        path = f"build_queue.targets.{name}"
+        target = c.mapping(raw, path)
+        if target is None or not c.keys(target, path, ("path", "kind"), ("owner_agent",)):
+            continue
+        c.text(target["path"], f"{path}.path")
+        c.enum(target["kind"], f"{path}.kind", TARGET_KINDS)
+        if "owner_agent" in target:
+            c.text(target["owner_agent"], f"{path}.owner_agent")
+    if "reference_sources" in queue:
+        c.string_list(queue["reference_sources"], "build_queue.reference_sources")
 
 
 def _delegation(c: _Check, value: Any) -> None:
@@ -303,6 +356,8 @@ def validate_profile(data: Any) -> list[Problem]:
         c.string_list(profile["hazard_families"], "hazard_families")
     if "gates" in profile:
         _gates(c, profile["gates"])
+    if "build_queue" in profile:
+        _build_queue(c, profile["build_queue"])
     if "delegation" in profile:
         _delegation(c, profile["delegation"])
     if "wp_kinds_enabled" in profile:

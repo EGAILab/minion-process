@@ -22,14 +22,20 @@ def journal_file(w: World) -> Path:
     return layout.journal_path(w.queue, w.broker.generation)
 
 
-def cut_after(w: World, kind: str, job_id: int | None = None, damage: str = "length", drop_from: int | None = None) -> None:
+def cut_after(
+    w: World, kind: str, job_id: int | None = None, damage: str = "length", drop_from: int | None = None
+) -> None:
     """Keep the journal up to and including the last `kind` record (for `job_id`), then damage that record:
     `length` enlarges its length prefix (Codex's probe), `marker` removes its commit marker, `checksum`
     flips a payload byte, `none` keeps it intact."""
     path = journal_file(w)
     data = path.read_bytes()
     replay = parse(data)
-    index = max(i for i, r in enumerate(replay.records) if r["kind"] == kind and (job_id is None or r.get("job_id") == job_id))
+    index = max(
+        i
+        for i, r in enumerate(replay.records)
+        if r["kind"] == kind and (job_id is None or r.get("job_id") == job_id)
+    )
     start = replay.ends[index - 1] if index else 0
     keep = data[: replay.ends[index]]
     record = keep[start:]
@@ -126,7 +132,9 @@ def test_w77_already_finished_ends_unknown_and_is_not_relaunched(tmp_path: Path,
     assert quarantined, "the ambiguous bytes are kept"
 
 
-def test_c15_c16_the_rejected_rules_would_launch_twice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_c15_c16_the_rejected_rules_would_launch_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """C-15: K-27's rule ("no live workload, therefore submitted") ignores the launch marker; C-16: a marker
     written after the effect gives no exclusivity. Together they make W-77 launch twice."""
     w = make_world(tmp_path)
@@ -144,7 +152,9 @@ def test_c15_c16_the_rejected_rules_would_launch_twice(tmp_path: Path, monkeypat
     def names(self: Any, kind: str, *prefix: str) -> list[str]:
         return [] if kind == "launch" else original_names(self, kind, *prefix)
 
-    def publish(self: Any, kind: str, identity: tuple[str, ...], payload: dict[str, Any], after_seq: int) -> None:
+    def publish(
+        self: Any, kind: str, identity: tuple[str, ...], payload: dict[str, Any], after_seq: int
+    ) -> None:
         if kind == "launch":
             return  # C-16: no write-ahead reservation
         original_publish(self, kind, identity, payload, after_seq)
@@ -156,14 +166,20 @@ def test_c15_c16_the_rejected_rules_would_launch_twice(tmp_path: Path, monkeypat
     assert len(w.host.spawned) == 2  # the hazard the agreed rules prevent
 
 
-def test_c14_discarding_short_tails_would_relaunch_a_live_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_c14_discarding_short_tails_would_relaunch_a_live_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     w = make_world(tmp_path)
     job_id = w.submit()["job_id"]
     cut_after(w, "launching", job_id, "length")
     from minion_process.hostqueue import markers as markers_mod
 
     original = markers_mod.Markers.names
-    monkeypatch.setattr(markers_mod.Markers, "names", lambda self, kind, *p: [] if kind == "launch" else original(self, kind, *p))
+    monkeypatch.setattr(
+        markers_mod.Markers,
+        "names",
+        lambda self, kind, *p: [] if kind == "launch" else original(self, kind, *p),
+    )
     monkeypatch.setattr(markers_mod.Markers, "publish", lambda *a, **k: None)
     w.host.groups[w.job(job_id).spec["group"]] = False  # an inspection that does not see the live work
     restart(w)
@@ -195,7 +211,18 @@ def test_launching_without_marker_and_unknown_workload(tmp_path: Path) -> None:
 def test_w57_w93_lost_accept_record_keeps_the_job_id(tmp_path: Path) -> None:
     w = make_world(tmp_path)
     w.host.memory = 0
-    request_id = client.put(w.queue, {"type": "submit", "class": "build", "profile": str(w.profile), "launcher": "rust", "target": "gate", "checkout": str(w.root / "repo"), "submitter": {"pane": "w1:p1", "session": "s1"}})
+    request_id = client.put(
+        w.queue,
+        {
+            "type": "submit",
+            "class": "build",
+            "profile": str(w.profile),
+            "launcher": "rust",
+            "target": "gate",
+            "checkout": str(w.root / "repo"),
+            "submitter": {"pane": "w1:p1", "session": "s1"},
+        },
+    )
     w.broker.step()
     job_id = decode_single((w.queue / "outbox" / f"{request_id}.res").read_bytes())["job_id"]
     cut_after(w, "accept", job_id, "checksum")
@@ -292,12 +319,16 @@ def test_w79_policy_restored_or_unknown(tmp_path: Path) -> None:
     w.confirm(w.request({"type": "repair-resume"})["code"])
     assert w.broker.policy is None and "no policy" in w.submit()["error"]  # never the older policy
     assert "must be 4" in w.request({"type": "policy-set", "policy": policy_dict(w.root, version=3)})["error"]
-    assert w.confirm(w.request({"type": "policy-set", "policy": policy_dict(w.root, version=4)})["code"])["ok"]
+    assert w.confirm(w.request({"type": "policy-set", "policy": policy_dict(w.root, version=4)})["code"])[
+        "ok"
+    ]
 
 
 def test_policy_without_a_readable_confirmation_is_unknown(tmp_path: Path) -> None:
     w = make_world(tmp_path)
-    w.broker.markers.publish("policy", ("2",), {"policy": policy_dict(w.root, version=2), "challenge": "missing"}, 0)
+    w.broker.markers.publish(
+        "policy", ("2",), {"policy": policy_dict(w.root, version=2), "challenge": "missing"}, 0
+    )
     report = restart(w)
     assert report.mode == "repair" and any("confirmation is not readable" in line for line in report.recovery)
 
@@ -351,7 +382,9 @@ def test_invariant_failure_keeps_the_prefix(tmp_path: Path) -> None:
     w.broker._record("launching", job_id=99) if False else None
     path = journal_file(w)
     last = parse(path.read_bytes()).last_seq
-    path.write_bytes(path.read_bytes() + encode({"seq": last + 1, "instance": "x", "kind": "launching", "job_id": 99}))
+    path.write_bytes(
+        path.read_bytes() + encode({"seq": last + 1, "instance": "x", "kind": "launching", "job_id": 99})
+    )
     report = restart(w)
     assert report.mode == "repair" and "invariant" in report.recovery[0]
     assert len(w.broker.replay.records) == last  # type: ignore[union-attr]
@@ -399,7 +432,9 @@ def test_marker_folder_unreadable_during_reconciliation(tmp_path: Path) -> None:
 
 def test_intact_journal_with_markers_ahead_records_the_recovery(tmp_path: Path) -> None:
     w = make_world(tmp_path)
-    w.broker.markers.publish("register", ("loose",), {"path": str(w.root / "exec" / "loose"), "job_id": 1, "manifest": []}, 0)
+    w.broker.markers.publish(
+        "register", ("loose",), {"path": str(w.root / "exec" / "loose"), "job_id": 1, "manifest": []}, 0
+    )
     report = restart(w)
     assert report.mode == "normal" and any("register/loose: restored" in line for line in report.recovery)
     assert "loose" in w.broker.state.copies

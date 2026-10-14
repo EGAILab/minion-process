@@ -1,6 +1,6 @@
 # Minion-Process profile -- the only project-specific process file.
 # Copy to <docs repo>/process/profile.yaml and run: python -m minion_process profile validate process/profile.yaml
-kit: {version: "0.3.0", source: EGAILab/minion-process}
+kit: {version: "0.4.0", source: EGAILab/minion-process}
 project: example-project
 
 authority:                                # semantic authority chain, highest first
@@ -29,9 +29,29 @@ implementation_order: [python, rust]
 taxonomy_aliases: {}                      # historical names -> generic classes (finding-taxonomy.md)
 hazard_families: [F1-js-number, F2-js-string-utf16, F3-unicode-icu, F4-async-order, F5-error-coercion, F6-object-order, F7-schema-runtime-domain]
 
-gates:                                    # launchers become kit launchers with self-tests in P3
+gates:                                    # `queue` makes a gate runnable by the host build queue (kit 0.4.0)
   python: {launcher: "scripts/gates-python.sh", tiers: [g0, g1, g2, g3]}
-  rust:   {launcher: "scripts/gates-rust.sh", tiers: [g0, g1, g2, g3]}
+  rust:
+    launcher: "scripts/gates-rust.sh"
+    tiers: [g0, g1, g2, g3]
+    queue:
+      argv: [cargo, test, --manifest-path, "{checkout}/Cargo.toml"]
+      target_env: [CARGO_TARGET_DIR]
+      source_globs: ["**/*.rs", "**/Cargo.toml", "Cargo.lock"]
+      env: {CARGO_BUILD_JOBS: "4"}
+      container: false
+
+build_queue:                              # docs/p3b/: one broker per host; this project's view of it
+  state: "E:/Example/.host-queue"
+  policy_id: host-example
+  project: example
+  exec_root: "E:/Example/project/.tmp/queue-exec"
+  log_root: "E:/Example/project/.tmp/gate-logs"
+  targets:
+    rust-gate: {path: "E:/Example/project/.tmp/cache/cargo-target/windows", kind: gate}
+    rust-controls: {path: "E:/Example/project/.tmp/cache/cargo-target/controls", kind: controls}
+    claude-rust: {path: "E:/Example/project/.tmp/claude-rust-target", kind: reviewer, owner_agent: claude}
+  reference_sources: ["E:/Example/project/assurance/incidents"]
 
 delegation: {source: "https://github.com/ORG/example/issues/1", routing: false}
 wp_kinds_enabled: [semantic, delta, process, scoping, status]
