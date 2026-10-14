@@ -428,6 +428,23 @@ disclosed as such and is never reported as a passing gate (`lessons/PLATFORM-EVI
 gate batch or container build runs concurrently. A result produced under concurrent load is re-run in
 isolation, not credited, pass or fail alike, and the evidence record says so.
 
+**The host build queue owns the host's build windows** (kit 0.4.0, `docs/p3b/`). A project that names
+`build_queue` in its profile runs every native gate, build and control through
+`minion-process build`, and no agent grants or holds windows. One broker per host is the only writer of
+queue state, with the single instance enforced by an OS mutex. It admits jobs by class:
+- **evidence** runs alone on the host, from a fresh copy of the exact commit;
+- **build** and **control** share the host up to the policy limit, above an exact-byte memory floor.
+
+Every job runs in a working folder it alone leases. A launcher names its paths only through declared
+slots, and every writable directory resource is proved free of links before the job starts. Execution
+copies stay registered and are never reused; the kit never deletes them, and the Owner removes them by
+hand. Only an evidence job that passed and whose copy stayed at the exact commit and clean is `eligible`.
+Build and control results are never evidence, whatever their exit code. A job's resources are released
+only on proof that its workload ended; otherwise the job is `uncertain` and holds them. The queue never
+kills, stops or signals a process, and never sends keys to a pane. Policy changes, releases and repairs
+need the Owner's `CONFIRM QUEUE <code>` in a Claude session, a procedural channel stated as such.
+Adoption steps: `docs/p3b/ADOPTION.md`.
+
 **Local storage stays inside the project roots.** Every file a gate, probe or control creates goes
 under a project root named in the profile's `repos`/`environment`: worktrees, scratch and disposable
 copies, temp directories (`TMP`, `TEMP`, `TMPDIR`, test tempdirs and pytest base temps), build caches
@@ -920,7 +937,11 @@ never carries an approval, a verdict or Owner authority. **Dispatch discipline:*
 delivery by reading the pane, never re-send blindly; never send Enter or any key to a pane that is
 blocked or showing a question or permission dialog, and never type or relay an approval code
 (`lessons/CONTAINMENT-2026-10-10.md`). Polling the other session or the expected artifact is the
-fallback for a lost notification, not the primary signal.
+fallback for a lost notification, not the primary signal. The kit itself never sends keys
+(`docs/p3b/`, K-1). `minion-process dispatch <issue> --print` renders the hand-off after the hand-off
+guards pass. It records the render so the same hand-off cannot be rendered twice without an explicit
+`--mark-undelivered`, and it prints the text. Delivery stays with the project's own Owner-governed helper.
+A queued job's completion is pulled with `build wait`, not pushed into a pane.
 
 ## 12. Repository and remote-state discipline
 
@@ -938,6 +959,10 @@ Fetch all with prune; identify the actual default branch and remote HEAD; record
 separately when they differ; inspect status and divergence before editing; preserve unrelated and
 untracked work; never reset or overwrite unrelated work to match an old instruction SHA. Do not infer
 progress from chat history, stale handoff text or local-only commits when the remote says otherwise.
+`minion-process session start --profile <profile> --agent <agent>` does this and writes nothing but Git
+metadata and its report. Its report also covers the queue's running, waiting and uncertain jobs, the
+registered copies and the work packages the agent may progress. A partial report is never a green
+prerequisite.
 
 ### 12.3 Commit and push every completed pass
 
