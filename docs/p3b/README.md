@@ -7,7 +7,7 @@ and reviewed in convergence episode `CE-PROC-P3B-01`.
 - **Revision 7:** Codex approved it in round 6.
 - **Invalidation:** kit `WORKFLOW.md` §11.8.10 invalidated that agreement after Codex round 8. Two
   implementation closure attempts had failed on R002, R003, R006 and R010.
-- **Revisions 8 to 14:** characterization resumed.
+- **Revisions 8 to 15:** characterization resumed.
 - **Owner decision (2026-10-14):** cleanup is deferred from 0.4.0, which withdraws R006.
 
 **Precedence.** Read the files in this order. A later file replaces only the rules it names:
@@ -25,7 +25,8 @@ and reviewed in convergence episode `CE-PROC-P3B-01`.
    of every writable directory resource).
 8. `checkpoint-r12.md`: K-43″. It is withdrawn, but kept as evidence for a later cleanup release.
 9. `checkpoint-r13.md`: the withdrawal of cleanup, K-46 and K-47.
-10. `checkpoint-r14.md`: K-48′ (registration lifecycle without cleanup) and the rule set for
+10. `checkpoint-r14.md`: K-48′ (registration lifecycle without cleanup).
+11. `checkpoint-r15.md`: K-48″ (human-confirmed end of a copy's creator) and the rule set for
     implementation revision 3.
 
 **Withdrawn from 0.4.0 (Owner decision, `#223`):**
@@ -36,7 +37,7 @@ and reviewed in convergence episode `CE-PROC-P3B-01`.
 - every revision of K-43;
 - the cleanup-dependent clauses of B-12, K-19 and K-38.
 
-The withdrawn text stays in the files above as history. The rule set in `checkpoint-r14.md` is the
+The withdrawn text stays in the files above as history. The rule set in `checkpoint-r15.md` is the
 effective one.
 
 **Correction folded in from Codex's round-6 note N001 (nonblocking).** K-34 says a crash before the
