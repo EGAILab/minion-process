@@ -52,11 +52,3 @@ def files(root: Path) -> Iterator[Path]:
     for entry in entries(root):
         if not entry.is_dir and not entry.is_link:
             yield entry.path
-
-
-def remove_entry(entry: Entry) -> None:
-    """Remove one entry without following it. A directory link loses only the link, never its target."""
-    if entry.is_dir or entry.link_is_dir:
-        os.rmdir(entry.path)
-    else:
-        os.unlink(entry.path)

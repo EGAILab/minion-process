@@ -31,6 +31,16 @@ class MutexResult:
     error: str | None = None  # access denied or a type conflict: refuse, never fall back to Local\ (K-16)
 
 
+class SpawnFailed(OSError):
+    """`spawn` failed. `stray` is the identity of a process it created before failing (for example, one
+    left suspended outside its job object after a failed assignment), so the broker keeps it uncertain
+    and never assumes it ended. The broker never kills it."""
+
+    def __init__(self, message: str, stray: ProcessIdentity | None = None) -> None:
+        super().__init__(message)
+        self.stray = stray
+
+
 @dataclass(frozen=True)
 class Spawned:
     """A workload started by `HostOS.spawn`: the runner process and the OS group that tracks it."""
@@ -67,6 +77,11 @@ class HostOS(Protocol):
     def free_memory_bytes(self) -> int | None: ...
 
     def monotonic(self) -> float: ...
+
+    def boot_id(self) -> str | None:
+        """An identifier of the current boot, so a monotonic deadline is compared only within its own
+        boot (R008). None when the boot cannot be identified; callers then treat deadlines as expired."""
+        ...
 
     def wall_time(self) -> str: ...
 

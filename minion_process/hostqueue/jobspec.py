@@ -21,6 +21,7 @@ from .policy import Policy
 from .resources import EXCLUSIVE, SHARED, canonical
 
 PLACEHOLDERS = ("checkout", "target", "log", "job_label", "workdir")
+DEFAULT_INHERIT = ["PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC"]
 
 
 class SpecError(ValueError):
@@ -105,6 +106,7 @@ def build_spec(
         if not isinstance(copies, list) or not copies or not all(isinstance(c, str) for c in copies):
             raise SpecError("cleanup needs a list of registered copy ids")
         spec["copies"] = list(copies)
+        spec["apply"] = request.get("apply") is True  # dry run unless the request explicitly applies (Part C)
         spec["leases"] = []  # filled by the broker from the registry, which owns the copy paths
         spec["downgrade_after_prepare"] = None
         return spec
@@ -123,8 +125,11 @@ def build_spec(
     kind = target.get("kind")
     if kind not in ("gate", "controls", "reviewer"):
         raise SpecError(f"target kind {kind!r} is not gate, controls or reviewer")
-    if klass == "control" and kind == "gate":
-        raise SpecError("a control job may use only a controls target (B-6, B-13)")
+    if klass == "control" and kind != "controls":
+        raise SpecError(
+            "a control job may use only a controls-kind target, "
+            "never a gate or reviewer gate cache (B-6, B-13)"
+        )
     if klass in ("evidence", "build") and kind == "controls":
         raise SpecError("evidence and build jobs never use a controls target (B-6)")
     if target.get("owner_agent") and target["owner_agent"] != agent:
@@ -145,13 +150,63 @@ def build_spec(
         "job_label": spec["job_label"],
         "workdir": workdir,
     }
+    job_tmp = os.path.join(exec_root, f"{queue_id}-job-{job_id}-tmp")
+    caches = queue_cfg.get("caches") or {}
+    if not isinstance(caches, dict):
+        raise SpecError("build_queue.caches must be a mapping")
+    cache_env = launcher.get("cache_env") or {}
+    if not isinstance(cache_env, dict):
+        raise SpecError("cache_env must be a mapping")
+    cache_paths: dict[str, str] = {}
+    for var, name in cache_env.items():
+        if name not in caches:
+            raise SpecError(
+                f"cache_env.{var} names cache {name!r}, which build_queue.caches does not declare"
+            )
+        cache_paths[str(var)] = _inside(roots, str(caches[name]), f"cache {name!r}")
+    bound = {
+        "target": target_path,
+        "run_dir": run_dir,
+        "workdir": workdir,
+        "log": spec["log"],
+        "tmp": job_tmp,
+    }
+    owned_dirs = [run_dir, workdir, job_tmp]  # writable locations owned by this job alone
+
+    def allowed(path: str, where: str) -> str:
+        """A host path the job may name: a leased resource exactly, or a path inside one it owns."""
+        canon = _inside(roots, path, where)
+        exact = {canonical(v) for v in (*bound.values(), *cache_paths.values())}
+        if canon in exact or any(canon.startswith(canonical(d) + os.sep) for d in owned_dirs):
+            return canon
+        raise SpecError(f"{where} names {path!r}, which is not a leased resource of this job (B-14)")
+
     resolved = [_substitute(a, values) for a in argv]
     for token in resolved:
         for candidate in _path_like(token):
-            _inside(roots, candidate, f"argv path {candidate!r}")
-    env = {str(k): _substitute(str(v), values) for k, v in (launcher.get("env") or {}).items()}
+            allowed(candidate, f"argv path {candidate!r}")
+    reserved = {*(str(v) for v in launcher.get("target_env") or []), *cache_paths, "TMP", "TEMP", "TMPDIR"}
+    env: dict[str, str] = {}
+    inherit = queue_cfg.get("inherit_env", DEFAULT_INHERIT)
+    if not isinstance(inherit, list) or not all(isinstance(v, str) for v in inherit):
+        raise SpecError("build_queue.inherit_env must be a list of variable names")
+    for var in inherit:
+        if var in reserved:
+            raise SpecError(f"inherit_env may not name the bound variable {var}")
+        if var in os.environ:
+            env[var] = os.environ[var]  # frozen at submit, compared again at launch (B-10)
+    for key, value in (launcher.get("env") or {}).items():
+        if str(key) in reserved:
+            raise SpecError(f"launcher env may not set the bound variable {key} (B-14)")
+        text = _substitute(str(value), values)
+        for candidate in _path_like(text):
+            allowed(candidate, f"env {key} path {candidate!r}")
+        env[str(key)] = text
     for var in launcher.get("target_env") or []:
         env[str(var)] = target_path
+    env.update(cache_paths)
+    for var in ("TMP", "TEMP", "TMPDIR"):
+        env[var] = job_tmp
     globs = launcher.get("source_globs") or []
     if klass == "build" and not globs:
         raise SpecError("a build launcher needs source_globs for the freshness step (K-12a)")
@@ -167,11 +222,13 @@ def build_spec(
             "run_dir": run_dir,
             "argv": resolved,
             "env": env,
+            "tmp": job_tmp,
             "source_globs": list(globs),
             "container": bool(launcher.get("container", False)),
         }
     )
-    leases = [[target_path, EXCLUSIVE]]
+    leases = [[target_path, EXCLUSIVE], [job_tmp, EXCLUSIVE]]
+    leases += [[path, SHARED] for path in sorted(set(cache_paths.values()))]
     if klass == "build":
         leases.append([checkout, EXCLUSIVE])
         spec["downgrade_after_prepare"] = checkout

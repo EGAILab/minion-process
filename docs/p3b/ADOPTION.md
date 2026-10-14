@@ -14,18 +14,37 @@ host build queue.
 3. **Install the confirmation hook** in each Claude project's settings as a `UserPromptSubmit` hook:
    `python -m minion_process.hostqueue.confirm --queue <queue folder>`. It acts only on a whole message
    `CONFIRM QUEUE <8 hex>`.
-4. **Profile.** Add `build_queue` (queue folder, the host `policy_id`, project name, execution and log
-   roots inside the project, targets with their kinds and reviewer owners, reference sources). For each
-   queued gate, add `gates.<name>.queue`: `argv` with placeholders `{checkout}`, `{target}`, `{log}`,
-   `{workdir}`, `{job_label}`, plus `target_env`, `source_globs`, `env` and `container`.
-5. **Host policy (first adopter only).**
+4. **Profile, `build_queue`.**
+   - The queue folder, the host `policy_id` and the project name.
+   - Execution and log roots inside the project.
+   - Targets with their kinds (`gate`, `controls`, `reviewer`) and reviewer owners.
+   - Shared `caches`, such as the Cargo home.
+   - `inherit_env`: the only host variables a launcher inherits. The default is `PATH`, `PATHEXT`,
+     `SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR` and `COMSPEC`.
+   - `cleanup_references`, which cleanup requires before it removes anything:
+     - `work_packages`: a command whose output is the open work packages' states;
+     - `incidents`: paths of incident records;
+     - `authority_cache`: paths of the authority cache.
+5. **Profile, `gates.<name>.queue` for each queued gate.**
+   - `argv`, using the placeholders `{checkout}`, `{target}`, `{log}`, `{workdir}` and `{job_label}`.
+   - `target_env`: the variables bound to the target.
+   - `cache_env`: each variable mapped to a declared cache.
+   - `source_globs`, `env` and `container`.
+
+   Every host path in `argv` or `env` must be a leased resource of the job. The kit sets
+   `TMP`/`TEMP`/`TMPDIR` to the job's own temporary folder, and a launcher can neither set those nor
+   override the target and cache variables. Anything else a tool writes must therefore go through those
+   variables.
+6. **Cleanup runs as a dry run unless `apply` is given.** The dry run writes a report of what it would
+   remove. An applied cleanup re-checks every Part C predicate before each batch.
+7. **Host policy (first adopter only).**
    - Start the broker: `minion-process build broker --queue <folder> --serve`, kept running in its own
      terminal.
    - Request policy version 1 with `minion-process build policy --queue <folder> --file policy.yaml
      --decision <link>`. The file lists every adopting project and its roots.
    - The Owner confirms the printed `CONFIRM QUEUE <code>`.
    - A later project joins with a new policy version that adds it, again with the Owner's confirmation.
-6. **Instruction files.** Replace "ask Codex for a native window" with `build submit`, then `build wait`
+8. **Instruction files.** Replace "ask Codex for a native window" with `build submit`, then `build wait`
    in the background. Evidence comes only from `evidence` jobs that report `eligible`.
 
 Rollback: stop submitting, wait until `build status` shows no active jobs, then return the profile to the

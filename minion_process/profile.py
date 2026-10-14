@@ -274,9 +274,8 @@ def _gates(c: _Check, value: Any) -> None:
 def _gate_queue(c: _Check, value: Any, path: str) -> None:
     """A launcher the kit host queue can run (docs/p3b/, B-10, B-14)."""
     queue = c.mapping(value, path)
-    if queue is None or not c.keys(
-        queue, path, ("argv",), ("env", "target_env", "source_globs", "container")
-    ):
+    optional = ("env", "target_env", "source_globs", "container", "cache_env")
+    if queue is None or not c.keys(queue, path, ("argv",), optional):
         return
     argv = queue["argv"]
     if not isinstance(argv, list):
@@ -286,10 +285,11 @@ def _gate_queue(c: _Check, value: Any, path: str) -> None:
     else:
         for i, item in enumerate(argv):
             c.text(item, f"{path}.argv[{i}]")
-    if "env" in queue:
-        env = c.mapping(queue["env"], f"{path}.env")
-        for key, item in (env or {}).items():
-            c.text(item, f"{path}.env.{key}")
+    for section in ("env", "cache_env"):
+        if section in queue:
+            mapping = c.mapping(queue[section], f"{path}.{section}")
+            for key, item in (mapping or {}).items():
+                c.text(item, f"{path}.{section}.{key}")
     for key in ("target_env", "source_globs"):
         if key in queue:
             c.string_list(queue[key], f"{path}.{key}")
@@ -300,7 +300,9 @@ def _gate_queue(c: _Check, value: Any, path: str) -> None:
 def _build_queue(c: _Check, value: Any) -> None:
     queue = c.mapping(value, "build_queue")
     required = ("state", "policy_id", "project", "exec_root", "log_root", "targets")
-    if queue is None or not c.keys(queue, "build_queue", required, ("reference_sources",)):
+    if queue is None or not c.keys(
+        queue, "build_queue", required, ("caches", "inherit_env", "cleanup_references")
+    ):
         return
     for key in required[:-1]:
         c.text(queue[key], f"build_queue.{key}")
@@ -316,8 +318,18 @@ def _build_queue(c: _Check, value: Any) -> None:
         c.enum(target["kind"], f"{path}.kind", TARGET_KINDS)
         if "owner_agent" in target:
             c.text(target["owner_agent"], f"{path}.owner_agent")
-    if "reference_sources" in queue:
-        c.string_list(queue["reference_sources"], "build_queue.reference_sources")
+    if "caches" in queue:
+        caches = c.mapping(queue["caches"], "build_queue.caches")
+        for name, item in (caches or {}).items():
+            c.text(item, f"build_queue.caches.{name}")
+    if "inherit_env" in queue:
+        c.string_list(queue["inherit_env"], "build_queue.inherit_env")
+    if "cleanup_references" in queue:
+        refs = c.mapping(queue["cleanup_references"], "build_queue.cleanup_references")
+        kinds = ("work_packages", "incidents", "authority_cache")
+        if refs is not None and c.keys(refs, "build_queue.cleanup_references", kinds, ()):
+            for kind in kinds:
+                c.string_list(refs[kind], f"build_queue.cleanup_references.{kind}", minimum=1)
 
 
 def _delegation(c: _Check, value: Any) -> None:

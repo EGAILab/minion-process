@@ -26,13 +26,14 @@ def evidence_copy(w: World, retain: bool = False) -> tuple[int, str, Path]:
     return job_id, copy_id, Path(str(job.spec["workdir"]))
 
 
-def cleanup(w: World, *copies: str) -> dict[str, Any]:
+def cleanup(w: World, *copies: str, apply: bool = True) -> dict[str, Any]:
     return w.request(
         {
             "type": "submit",
             "class": "cleanup",
             "profile": str(w.profile),
             "copies": list(copies),
+            "apply": apply,
             "submitter": {"pane": "w1:p1", "session": "s1"},
         }
     )
@@ -115,7 +116,7 @@ def test_c12_empty_reference_set_removes_a_live_reference(
     w = make_world(tmp_path)
     _, copy_id, workdir = evidence_copy(w)
     waiting_user(w, workdir)
-    monkeypatch.setattr(broker_mod.Broker, "_cleanup_references", lambda self, job: None)
+    monkeypatch.setattr(broker_mod.Broker, "_cleanup_predicates", lambda self, job: None)
     cleanup(w, copy_id)
     for _ in range(3):
         w.broker.step()
@@ -125,22 +126,18 @@ def test_c12_empty_reference_set_removes_a_live_reference(
 def test_w63_reference_sources_and_unreadable_sources(tmp_path: Path) -> None:
     w = make_world(tmp_path)
     _, copy_id, workdir = evidence_copy(w)
-    incidents = w.root / "incidents"
-    incidents.mkdir()
-    (incidents / "i1.md").write_text(f"evidence kept at {workdir}\n", encoding="utf-8")
-    data = yaml.safe_load(w.profile.read_text(encoding="utf-8"))
-    data["build_queue"]["reference_sources"] = [str(incidents)]
-    w.profile.write_text(yaml.safe_dump(data), encoding="utf-8")
+    (w.root / "incidents" / "i1.md").write_text(f"evidence kept at {workdir}\n", encoding="utf-8")
     job = w.job(cleanup(w, copy_id)["job_id"])
     w.broker.step()
     assert job.outcome == "failed" and "referenced in" in str(job.reason) and workdir.exists()
-    data["build_queue"]["reference_sources"] = [str(w.root / "missing-folder" / "x.md")]
+    data = yaml.safe_load(w.profile.read_text(encoding="utf-8"))
+    data["build_queue"]["cleanup_references"]["incidents"] = [str(w.root / "missing-folder" / "x.md")]
     w.profile.write_text(yaml.safe_dump(data), encoding="utf-8")
     job = w.job(cleanup(w, copy_id)["job_id"])
     w.broker.step()
     assert "unreadable" in str(job.reason) and workdir.exists()
-    data["build_queue"]["reference_sources"] = [str(incidents / "i1.md")]
-    (incidents / "i1.md").write_text("nothing here\n", encoding="utf-8")
+    data["build_queue"]["cleanup_references"]["incidents"] = [str(w.root / "incidents")]
+    (w.root / "incidents" / "i1.md").write_text("nothing here\n", encoding="utf-8")
     w.profile.write_text(yaml.safe_dump(data), encoding="utf-8")
     job = w.job(cleanup(w, copy_id)["job_id"])
     w.broker.step()
@@ -156,7 +153,7 @@ def test_cleanup_profile_unreadable_at_the_boundary(tmp_path: Path) -> None:
     w.host.memory = 64 * 1024**3
     w.broker.step()
     w.broker.step()
-    assert "reference sources unreadable" in str(w.job(response["job_id"]).reason) and workdir.exists()
+    assert "profile unreadable at the boundary" in str(w.job(response["job_id"]).reason) and workdir.exists()
 
 
 def test_w81_w82_recovered_cleanup_extent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

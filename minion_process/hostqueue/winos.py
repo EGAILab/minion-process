@@ -32,7 +32,7 @@ import time
 from ctypes import wintypes
 from pathlib import Path
 
-from .hostos import MutexResult, ProcessIdentity, Spawned
+from .hostos import MutexResult, ProcessIdentity, Spawned, SpawnFailed
 
 MUTEX_NAME = "Global\\MinionProcessHostQueue"
 WAIT_OBJECT_0 = 0x00000000
@@ -71,6 +71,18 @@ class _ACCOUNTING(ctypes.Structure):
         ("TotalProcesses", wintypes.DWORD),
         ("ActiveProcesses", wintypes.DWORD),
         ("TotalTerminatedProcesses", wintypes.DWORD),
+    ]
+
+
+class _TIMEOFDAY(ctypes.Structure):
+    _fields_ = [
+        ("BootTime", ctypes.c_longlong),
+        ("CurrentTime", ctypes.c_longlong),
+        ("TimeZoneBias", ctypes.c_longlong),
+        ("TimeZoneId", ctypes.c_ulong),
+        ("Reserved", ctypes.c_ulong),
+        ("BootTimeBias", ctypes.c_ulonglong),
+        ("SleepTimeBias", ctypes.c_ulonglong),
     ]
 
 
@@ -208,13 +220,13 @@ class WindowsHostOS:
             creationflags=CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP,
         )
         handle = int(process._handle)  # type: ignore[attr-defined]
+        ident = ProcessIdentity(process.pid, self._times(handle) or 0)
         if not self.k32.AssignProcessToJobObject(job, handle):
-            raise OSError(f"AssignProcessToJobObject failed: {ctypes.get_last_error()}")
+            raise SpawnFailed(f"AssignProcessToJobObject failed: {ctypes.get_last_error()}", ident)
         status = self.ntdll.NtResumeProcess(handle)
         if status != 0:
-            raise OSError(f"NtResumeProcess failed: {status:#x}")
-        start = self._times(handle)
-        return Spawned(ProcessIdentity(process.pid, start or 0), group)
+            raise SpawnFailed(f"NtResumeProcess failed: {status:#x}", ident)
+        return Spawned(ident, group)
 
     def _job(self, group: str) -> int | None:
         if group in self.jobs:
@@ -280,6 +292,15 @@ class WindowsHostOS:
 
     def monotonic(self) -> float:
         return time.monotonic()
+
+    def boot_id(self) -> str | None:
+        """The system boot time from `NtQuerySystemInformation(SystemTimeOfDayInformation)`, exact and
+        stable for the whole boot."""
+        info = _TIMEOFDAY()
+        status = self.ntdll.NtQuerySystemInformation(3, ctypes.byref(info), ctypes.sizeof(info), None)
+        if status != 0:
+            return None
+        return str(info.BootTime)
 
     def wall_time(self) -> str:
         return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

@@ -140,6 +140,8 @@ class QueueState:
         job.extent_known = bool(rec.get("extent_known", True))
         if rec.get("group"):
             job.group = rec["group"]
+        if rec.get("runner"):
+            job.runner = rec["runner"]
 
     def _on_ended(self, rec: dict[str, Any], now: float) -> None:
         job = self._job(rec, "launching", "running", "uncertain")
@@ -189,10 +191,15 @@ class QueueState:
             raise InvariantError(f"record {rec['seq']}: render attempt {rec['attempt']} after {previous}")
         if previous and previous not in self.undelivered.get(rec["hash"], set()):
             raise InvariantError(f"record {rec['seq']}: render retry without an undelivered attempt")
+        self.undelivered.get(rec["hash"], set()).discard(previous)  # one grant authorizes one retry
         self.renders[rec["hash"]] = rec["attempt"]
 
     def _on_undelivered(self, rec: dict[str, Any], now: float) -> None:
         self.undelivered.setdefault(rec["hash"], set()).add(rec["attempt"])
+
+    def _on_undelivered_revoked(self, rec: dict[str, Any], now: float) -> None:
+        """Recovery: a journal grant whose published marker cannot be read is withdrawn (R005)."""
+        self.undelivered.get(rec["hash"], set()).discard(rec["attempt"])
 
     def _on_register(self, rec: dict[str, Any], now: float) -> None:
         self.copies[rec["copy_id"]] = {

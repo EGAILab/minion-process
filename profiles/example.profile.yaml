@@ -39,6 +39,7 @@ gates:                                    # `queue` makes a gate runnable by the
       target_env: [CARGO_TARGET_DIR]
       source_globs: ["**/*.rs", "**/Cargo.toml", "Cargo.lock"]
       env: {CARGO_BUILD_JOBS: "4"}
+      cache_env: {CARGO_HOME: cargo-home}
       container: false
 
 build_queue:                              # docs/p3b/: one broker per host; this project's view of it
@@ -51,7 +52,13 @@ build_queue:                              # docs/p3b/: one broker per host; this
     rust-gate: {path: "E:/Example/project/.tmp/cache/cargo-target/windows", kind: gate}
     rust-controls: {path: "E:/Example/project/.tmp/cache/cargo-target/controls", kind: controls}
     claude-rust: {path: "E:/Example/project/.tmp/claude-rust-target", kind: reviewer, owner_agent: claude}
-  reference_sources: ["E:/Example/project/assurance/incidents"]
+  caches:
+    cargo-home: "E:/Example/project/.tmp/cache/cargo-home"
+  inherit_env: [PATH, PATHEXT, SYSTEMROOT, SYSTEMDRIVE, WINDIR, COMSPEC]
+  cleanup_references:
+    work_packages: [python, -m, minion_process, open-states]
+    incidents: ["E:/Example/project/assurance/incidents"]
+    authority_cache: ["E:/Example/project/.tmp/authority"]
 
 delegation: {source: "https://github.com/ORG/example/issues/1", routing: false}
 wp_kinds_enabled: [semantic, delta, process, scoping, status]

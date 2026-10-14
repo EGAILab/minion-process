@@ -163,7 +163,14 @@ def _runner_job(tmp_path: Path, argv: list[str]) -> Path:
     job_dir = tmp_path / "job"
     job_dir.mkdir()
     (job_dir / "input").write_bytes(
-        encode({"argv": argv, "cwd": str(tmp_path), "log": str(tmp_path / "logs" / "j.log")})
+        encode(
+            {
+                "argv": argv,
+                "cwd": str(tmp_path),
+                "log": str(tmp_path / "logs" / "j.log"),
+                "roots": [str(tmp_path)],
+            }
+        )
     )
     return job_dir
 
@@ -172,7 +179,7 @@ def test_runner_records_exit_and_gate_end(tmp_path: Path) -> None:
     job_dir = _runner_job(tmp_path, [sys.executable, "-c", "print('hello'); raise SystemExit(3)"])
     assert runner.run(job_dir) == 3
     result = decode_single((job_dir / "result").read_bytes())
-    assert result == {"exit": 3, "gate_end": 3}
+    assert result == {"exit": 3, "gate_end": 3, "drained": False}
     log = (tmp_path / "logs" / "j.log").read_text()
     assert "hello" in log and log.rstrip().endswith("GATE-END 3")
 
@@ -180,7 +187,8 @@ def test_runner_records_exit_and_gate_end(tmp_path: Path) -> None:
 def test_runner_setup_failure_is_never_a_pass(tmp_path: Path) -> None:
     job_dir = _runner_job(tmp_path, [str(tmp_path / "no-such-launcher.exe")])
     assert runner.run(job_dir) == 127
-    assert decode_single((job_dir / "result").read_bytes())["exit"] == 127
+    result = decode_single((job_dir / "result").read_bytes())
+    assert result["exit"] == 127 and result["drained"] is False  # outside a job object: no drain claimed
 
 
 def test_runner_gate_end_parsing(tmp_path: Path) -> None:

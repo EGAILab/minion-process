@@ -40,3 +40,7 @@ jobs:
       - run: python -m pytest -q
       - run: python -m minion_process profile validate profiles/example.profile.yaml
       - run: python -m minion_process profile validate profiles/minion-agent.profile.yaml
+      # A non-editable install must carry every subpackage (minion_process.hostqueue included).
+      - run: python -m pip wheel . --no-deps -w dist
+      - run: python -m venv /tmp/wheelcheck && /tmp/wheelcheck/bin/pip install dist/*.whl
+      - run: cd /tmp && /tmp/wheelcheck/bin/python -c "import minion_process.cli, minion_process.hostqueue.broker"

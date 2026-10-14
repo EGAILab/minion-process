@@ -38,8 +38,20 @@ ownership moves to a host queue (`minion-agent#209` issuecomment-6138907446); th
 - `minion_process/faults.py`: fault-fired accounting for feasibility matrices and control recipes.
 - Profile: optional `build_queue` and per-gate `queue` (schema and validator, differential tests).
 - `WORKFLOW.md` §9.8 (host build queue), §11.17 (the kit renders but never sends), §12.2 (`session start`).
-- CI: a Windows job runs the full suite with the 100% coverage gate, because the host adapter is Windows
-  only. The Linux job runs lint, types and the tests.
+- CI: a Windows job runs every gate, including the 100% coverage gate and strict mypy, because the host
+  adapter is Windows only. The Linux job runs lint, the tests and a non-editable wheel install smoke check.
+- Implementation review round 7 remediation:
+  - **R002:** the runner records `drained` only after a successful accounting query. A spawn failure keeps
+    the identity of any process it created.
+  - **R003:** the effective environment is frozen and bound to leased resources: `inherit_env`, `caches`,
+    `cache_env`, and a per-job temporary folder. Controls require a controls-kind target.
+  - **R005:** a retry grant stands only with its readable marker.
+  - **R006:** cleanup is a dry run by default. Apply re-checks the full Part C conjunction before every
+    batch, with a declared reference set, and submissions naming a cleaned resource are refused.
+  - **R008:** challenges are bound to the boot.
+  - **R009:** containment proves the root and its ancestors, and every mutation goes through `fsops`.
+  - **R010:** request shapes are validated per type, and a malformed request is rejected alone.
+  - **Packaging:** subpackages are included, with a wheel smoke check in CI.
 - Not in 0.4.0: automatic pane sending (deferred, K-4); the incident replay suite (P4).
 
 ## 0.3.1 — lesson: shared build caches and mtime freshness (2026-10-13)

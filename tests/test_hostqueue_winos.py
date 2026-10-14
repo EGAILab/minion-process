@@ -166,7 +166,7 @@ def test_runner_holds_its_job_and_drains(tmp_path: Path, monkeypatch: pytest.Mon
     time.sleep(0.3)  # both processes are in the job: the drain must wait for one of them to exit
     monkeypatch.setenv("MINION_JOB_GROUP", group)
     started = time.monotonic()
-    runner._hold_and_drain()  # this test process is outside the job: active count reaches 0, then returns
+    assert runner._hold_and_drain() is True  # this test process is outside the job: the count reaches 0
     assert time.monotonic() - started >= 0.5
 
 
@@ -190,8 +190,9 @@ def test_job_object_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(winos.subprocess, "Popen", lambda *a, **k: FakeProcess())
     monkeypatch.setattr(h.k32, "AssignProcessToJobObject", lambda job, process: 0)
-    with pytest.raises(OSError, match="AssignProcessToJobObject"):
+    with pytest.raises(OSError, match="AssignProcessToJobObject") as failed:
         h.spawn(["x"], {}, tmp_path, tmp_path / "log", f"MinionProcessTest-{secrets.token_hex(6)}")
+    assert failed.value.stray is not None and failed.value.stray.pid == os.getpid()  # R002: identity kept
     monkeypatch.setattr(
         h.k32, "AssignProcessToJobObject", lambda job, process: 1
     )  # pretend; never assigns this process
@@ -242,6 +243,43 @@ def test_herdr_pane(tmp_path: Path) -> None:
     assert host(herdr=_shim(tmp_path, "h3", "", 1)).pane("w1:p1") is None
     assert host(herdr=str(tmp_path / "no-herdr.exe")).pane("w1:p1") is None
     assert host(herdr=_shim(tmp_path, "h4", '{"result":{"agent":[1]}}')).pane("w1:p1") is None
+
+
+def test_r008_boot_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    h = host()
+    first = h.boot_id()
+    assert first is not None and first == h.boot_id()  # stable within one boot
+    monkeypatch.setattr(h.ntdll, "NtQuerySystemInformation", lambda *a: 0xC0000001)
+    assert h.boot_id() is None
+
+
+class _FakeK32:
+    """Stands in for kernel32 inside the runner's drain, so a failed open or query is observable."""
+
+    def __init__(self, open_handle: int, query_ok: bool) -> None:
+        self.open_handle = open_handle
+        self.query_ok = query_ok
+
+        class _F:
+            def __init__(self, fn: Any) -> None:
+                self.fn = fn
+                self.argtypes: Any = None
+                self.restype: Any = None
+
+            def __call__(self, *a: Any) -> Any:
+                return self.fn(*a)
+
+        self.OpenJobObjectW = _F(lambda *a: self.open_handle)
+        self.QueryInformationJobObject = _F(lambda *a: 1 if self.query_ok else 0)
+
+
+@pytest.mark.parametrize(("open_handle", "query_ok"), [(0, True), (7, False)])
+def test_r002_runner_claims_no_drain_on_failed_open_or_query(
+    monkeypatch: pytest.MonkeyPatch, open_handle: int, query_ok: bool
+) -> None:
+    monkeypatch.setenv("MINION_JOB_GROUP", "any-group")
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **k: _FakeK32(open_handle, query_ok))
+    assert runner._hold_and_drain() is False
 
 
 def test_memory_clock_volume(monkeypatch: pytest.MonkeyPatch) -> None:

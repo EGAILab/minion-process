@@ -128,7 +128,7 @@ def test_w77_already_finished_ends_unknown_and_is_not_relaunched(tmp_path: Path,
     assert job.status == "ended" and job.outcome == "unknown-outcome" and not job.eligible
     w.broker.step()
     assert len(w.host.spawned) == 1  # launch count 1, not 2
-    quarantined = list((w.queue / "quarantine").rglob("*tail"))
+    quarantined = list((w.queue / "quarantine").rglob("*tail*"))
     assert quarantined, "the ambiguous bytes are kept"
 
 
@@ -229,7 +229,18 @@ def test_w57_w93_lost_accept_record_keeps_the_job_id(tmp_path: Path) -> None:
     (w.queue / "outbox" / f"{request_id}.res").unlink()  # the response is lost too
     report = restart(w)
     assert report.mode == "normal" and w.job(job_id).request_id == request_id
-    again = w.request({"type": "submit", "request_id": request_id, "class": "build"})
+    again = w.request(
+        {
+            "type": "submit",
+            "request_id": request_id,
+            "class": "build",
+            "profile": str(w.profile),
+            "launcher": "rust",
+            "target": "gate",
+            "checkout": str(w.root / "repo"),
+            "submitter": {"pane": "w1:p1", "session": "s1"},
+        }
+    )
     assert again["duplicate"] and again["job_id"] == job_id
 
 
@@ -369,7 +380,7 @@ def test_w52_mid_journal_damage_needs_repair(tmp_path: Path) -> None:
     assert "resume needs" in w.request({"type": "repair-resume"})["error"]
     quarantine = w.request({"type": "repair-quarantine"})
     assert quarantine["ok"] and w.confirm(quarantine["code"])["ok"]
-    assert list((w.queue / "quarantine").rglob("*full"))
+    assert list((w.queue / "quarantine").rglob("*full*"))
     assert w.broker.state.mode == "repair" and w.broker.generation == 2
     resume = w.request({"type": "repair-resume"})
     assert w.confirm(resume["code"])["ok"] and w.broker.state.mode == "normal"

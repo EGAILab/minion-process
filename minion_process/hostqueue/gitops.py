@@ -16,6 +16,10 @@ class GitOps(Protocol):
 
     def prune(self, source: Path) -> None: ...
 
+    def unpushed(self, workdir: Path) -> list[str] | None:
+        """Commits reachable from HEAD but from no remote ref; None if it cannot be established."""
+        ...
+
 
 class RealGit:
     def _run(self, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -36,3 +40,7 @@ class RealGit:
 
     def prune(self, source: Path) -> None:
         self._run(["-C", str(source), "worktree", "prune"])
+
+    def unpushed(self, workdir: Path) -> list[str] | None:
+        result = self._run(["-C", str(workdir), "rev-list", "HEAD", "--not", "--remotes"])
+        return result.stdout.split() if result.returncode == 0 else None

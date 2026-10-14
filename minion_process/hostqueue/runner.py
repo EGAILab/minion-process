@@ -16,15 +16,17 @@ import sys
 import time
 from pathlib import Path
 
+from . import fsops
 from .framing import decode_single, encode
 
 
-def _hold_and_drain() -> None:
+def _hold_and_drain() -> bool:
     """On Windows, hold a handle to this process's own job object, then wait until this runner is the only
-    live process left in it. Writing the result afterwards proves the job's processes drained. A missing job
-    association (not under the broker, or not Windows) skips the wait; the broker then needs its own proof."""
+    live process left in it. Returns True only when a successful accounting query observed that state. A
+    missing job, a failed open or a failed query returns False, and the result then claims no drain
+    (PROC-KIT-P3B-R002). The broker accepts the result-file shortcut only with `drained: true`."""
     if sys.platform != "win32":  # pragma: no cover - other platforms have no job objects
-        return
+        return False
     import ctypes
     from ctypes import wintypes
 
@@ -42,23 +44,26 @@ def _hold_and_drain() -> None:
     k32.OpenJobObjectW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
     group = os.environ.get("MINION_JOB_GROUP", "")
     if not group:
-        return
+        return False
     handle = k32.OpenJobObjectW(0x0004, False, f"Local\\{group}")
     if not handle:
-        return  # not the broker's job object: no drain proof is claimed; the broker treats the end as unknown
+        return False
     _hold_and_drain.handle = handle  # type: ignore[attr-defined]  # kept open until the process exits
     info = _ACCOUNTING()
-    while k32.QueryInformationJobObject(handle, 1, ctypes.byref(info), ctypes.sizeof(info), None):
+    while True:
+        if not k32.QueryInformationJobObject(handle, 1, ctypes.byref(info), ctypes.sizeof(info), None):
+            return False
         if info.ActiveProcesses <= 1:
-            return
+            return True
         time.sleep(1.0)
 
 
 def run(job_dir: Path) -> int:
     spec = decode_single((job_dir / "input").read_bytes())
     log = Path(spec["log"])
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with open(log, "ab") as out:
+    roots = [Path(r) for r in spec["roots"]]
+    fsops.mkdir(roots, log.parent)
+    with fsops.open_append(roots, log) as out:  # type: ignore[attr-defined]
         try:
             code = subprocess.run(
                 spec["argv"], cwd=spec["cwd"], stdout=out, stderr=subprocess.STDOUT, check=False
@@ -67,13 +72,17 @@ def run(job_dir: Path) -> int:
             out.write(f"launcher failed to start: {exc}\n".encode())
             code = 127
         out.flush()
-        _hold_and_drain()
+        drained = _hold_and_drain()
         out.write(f"GATE-END {code}\n".encode())
         out.flush()
         os.fsync(out.fileno())
     temp = job_dir / f".tmp-runner-{os.getpid()}"
-    temp.write_bytes(encode({"exit": code, "gate_end": _gate_end(log)}))
-    os.replace(temp, job_dir / "result")
+    fsops.write_replace(
+        [job_dir.parent],
+        temp,
+        job_dir / "result",
+        encode({"exit": code, "gate_end": _gate_end(log), "drained": drained}),
+    )
     return code
 
 

@@ -30,6 +30,7 @@ class FakeHost:
     next_pid: int = 5000
     publish_calls: list[Path] = field(default_factory=list)
     group_query_error: bool = False
+    boot: str | None = "boot-1"
 
     # -- mutex ------------------------------------------------------------------------------------------
     def acquire_broker_mutex(self) -> MutexResult:
@@ -89,6 +90,9 @@ class FakeHost:
     def monotonic(self) -> float:
         return self.clock
 
+    def boot_id(self) -> str | None:
+        return self.boot
+
     def wall_time(self) -> str:
         return "2026-10-13T20:00:00Z"
 
@@ -113,6 +117,7 @@ class FakeGit:
     clean_state: dict[str, bool | None] = field(default_factory=dict)
     add_error: OSError | None = None
     pruned: list[Path] = field(default_factory=list)
+    unpushed_commits: dict[str, list[str] | None] = field(default_factory=dict)
     files: tuple[str, ...] = ("src/lib.rs", "Cargo.toml")
 
     def add_worktree(self, source: Path, workdir: Path, sha: str) -> None:
@@ -133,6 +138,9 @@ class FakeGit:
 
     def prune(self, source: Path) -> None:
         self.pruned.append(source)
+
+    def unpushed(self, workdir: Path) -> list[str] | None:
+        return self.unpushed_commits.get(str(workdir), [])
 
 
 def pane_info(session: str, agent: str = "claude") -> dict[str, Any]:

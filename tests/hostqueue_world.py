@@ -3,6 +3,7 @@ broker on the fake host, and a confirmed initial policy."""
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -103,6 +104,10 @@ def make_world(tmp: Path, with_policy: bool = True) -> World:
         (root / "targets" / name).mkdir(parents=True)
     (root / "exec").mkdir()
     (root / "logs").mkdir()
+    (root / "incidents").mkdir()
+    (root / "incidents" / "none.md").write_text("no incidents\n", encoding="utf-8")
+    (root / "authority").mkdir()
+    (root / "authority" / "pins.txt").write_text("pinned\n", encoding="utf-8")
     profile = root / "profile.yaml"
     profile.write_text(
         yaml.safe_dump(
@@ -124,7 +129,11 @@ def make_world(tmp: Path, with_policy: bool = True) -> World:
                             "owner_agent": "claude",
                         },
                     },
-                    "reference_sources": [],
+                    "cleanup_references": {
+                        "work_packages": [sys.executable, "-c", "print('no open work packages')"],
+                        "incidents": [str(root / "incidents")],
+                        "authority_cache": [str(root / "authority")],
+                    },
                 },
                 "gates": {
                     "rust": {

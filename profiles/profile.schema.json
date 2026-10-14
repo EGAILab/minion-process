@@ -375,6 +375,12 @@
               },
               "container": {
                 "type": "boolean"
+              },
+              "cache_env": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/$defs/text"
+                }
               }
             }
           }
@@ -436,8 +442,46 @@
             }
           }
         },
-        "reference_sources": {
+        "caches": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/text"
+          }
+        },
+        "inherit_env": {
           "$ref": "#/$defs/textList"
+        },
+        "cleanup_references": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "work_packages",
+            "incidents",
+            "authority_cache"
+          ],
+          "properties": {
+            "work_packages": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/text"
+              }
+            },
+            "incidents": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/text"
+              }
+            },
+            "authority_cache": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/text"
+              }
+            }
+          }
         }
       }
     },

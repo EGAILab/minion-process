@@ -20,8 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import fsops
 from .framing import FramingError, decode_single, encode
 from .hostos import HostOS
+from .walk import entries
 
 KINDS = (
     "launch",
@@ -70,21 +72,15 @@ class Markers:
     def publish(self, kind: str, identity: tuple[str, ...], payload: dict[str, Any], after_seq: int) -> None:
         """Publish the marker, or raise `MarkerExists` if the final name is taken."""
         final = self.path(kind, *identity)
-        final.parent.mkdir(parents=True, exist_ok=True)
+        roots = [self.root.parent]
+        fsops.mkdir(roots, final.parent)
         body = encode({"kind": kind, "identity": list(identity), "after_seq": after_seq, **payload})
         temp = final.parent / f".tmp-{self.instance}-{secrets.token_hex(8)}"
-        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+        fsops.write_new(roots, temp, body)
         try:
-            view = memoryview(body)
-            while view:
-                view = view[os.write(fd, view) :]
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        try:
-            self.host.publish(temp, final)
+            fsops.publish(roots, temp, final, self.host.publish)
         except FileExistsError:
-            temp.unlink()  # our own unpublished temporary; never a published marker
+            fsops.unlink(roots, temp)  # our own unpublished temporary; never a published marker
             raise MarkerExists(str(final)) from None
 
     def read(self, kind: str, *identity: str) -> dict[str, Any] | Absent | Unreadable:
@@ -111,12 +107,11 @@ class Markers:
     def remove_own_temporaries(self, instance_start_marker: str) -> list[str]:
         """Remove `.tmp-<instance>-*` files this broker instance wrote (K-20, B-29). Never another's."""
         removed: list[str] = []
-        if not self.root.exists():
+        if not os.path.lexists(self.root):
             return removed
         prefix = f".tmp-{instance_start_marker}-"
-        for folder, _dirs, files in os.walk(self.root):
-            for name in files:
-                if name.startswith(prefix):
-                    os.unlink(os.path.join(folder, name))
-                    removed.append(name)
+        for entry in entries(self.root):
+            if not entry.is_dir and not entry.is_link and entry.path.name.startswith(prefix):
+                fsops.unlink([self.root.parent], entry.path)
+                removed.append(entry.path.name)
         return removed

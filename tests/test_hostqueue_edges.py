@@ -46,6 +46,7 @@ def test_removed_copies_are_skipped_in_recovery(tmp_path: Path) -> None:
         {
             "type": "submit",
             "class": "cleanup",
+            "apply": True,
             "profile": str(w.profile),
             "copies": [copy_id],
             "submitter": {"pane": "w1:p1", "session": "s1"},
@@ -88,6 +89,7 @@ def test_retain_rechecked_at_the_cleanup_boundary(tmp_path: Path) -> None:
         {
             "type": "submit",
             "class": "cleanup",
+            "apply": True,
             "profile": str(w.profile),
             "copies": [copy_id],
             "submitter": {"pane": "w1:p1", "session": "s1"},
@@ -157,7 +159,8 @@ def test_runner_main_and_bad_gate_end(tmp_path: Path) -> None:
             {
                 "argv": [sys.executable, "-c", "print('GATE-END x')"],
                 "cwd": str(tmp_path),
-                "log": str(tmp_path / "l.log"),
+                "log": str(tmp_path / "logs" / "l.log"),
+                "roots": [str(tmp_path)],
             }
         )
     )
@@ -184,13 +187,14 @@ def test_real_git_operations(tmp_path: Path) -> None:
     copy = tmp_path / "copy"
     git.add_worktree(repo, copy, sha)
     assert git.head(copy) == sha and git.clean(copy) is True
+    assert git.unpushed(copy) == [sha]  # no remote at all: the commit is reachable from no remote ref
     (copy / "new.txt").write_text("y")
     assert git.clean(copy) is False
     with pytest.raises(OSError, match="worktree add failed"):
         git.add_worktree(repo, tmp_path / "copy2", "0" * 40)
     missing = tmp_path / "not-a-repo"
     missing.mkdir()
-    assert git.head(missing) is None and git.clean(missing) is None
+    assert git.head(missing) is None and git.clean(missing) is None and git.unpushed(missing) is None
     git.prune(repo)
 
 

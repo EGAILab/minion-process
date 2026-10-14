@@ -31,7 +31,7 @@ from typing import Any
 import yaml
 
 from .. import faults
-from . import client, layout
+from . import client, fsops, layout
 from .broker import Broker, BrokerRefused
 from .framing import decode_single
 from .journal import read as read_journal
@@ -314,7 +314,11 @@ def run_session(args: Any, gh_issues: Any = None) -> int:
     report = session_start(Path(args.profile), args.agent, gh_issues)
     text = yaml.safe_dump(report, sort_keys=False)
     if args.out:
-        Path(args.out).write_text(text, encoding="utf-8")
+        # The report is the only file session start writes; it must lie inside the profile's repository.
+        code, top = _git(["rev-parse", "--show-toplevel"], Path(args.profile).parent)
+        base = Path(top) if code == 0 else Path(args.profile).resolve().parent
+        out = Path(args.out).resolve()
+        fsops.write_replace([base], out.with_name(f".tmp-session-{out.name}"), out, text.encode("utf-8"))
     print(text, end="")
     print("PARTIAL" if report["partial"] else "COMPLETE")
     return 1 if report["partial"] else 0

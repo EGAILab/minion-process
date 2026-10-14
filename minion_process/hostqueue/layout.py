@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from . import fsops
+
 INBOX = "inbox"
 OUTBOX = "outbox"
 REJECTED = "rejected"
@@ -32,4 +34,4 @@ def journal_path(root: Path, generation: int) -> Path:
 
 def ensure(root: Path) -> None:
     for name in (INBOX, OUTBOX, REJECTED, QUARANTINE, JOURNAL, JOBS, "effects"):
-        (root / name).mkdir(parents=True, exist_ok=True)
+        fsops.mkdir([root.parent], root / name)  # the queue folder itself is proved from its parent

@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import secrets
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,7 +26,7 @@ from typing import Any
 
 import yaml
 
-from . import layout
+from . import fsops, layout
 from .contain import Contained, assert_inside
 from .framing import FramingError, decode_single, encode
 from .gitops import GitOps
@@ -35,8 +36,10 @@ from .journal import Journal, Replay, parse
 from .markers import MarkerExists, Markers, Unreadable
 from .policy import Policy, PolicyError
 from .policy import parse as parse_policy
+from .requests import malformed
+from .resources import canonical, conflicts
 from .state import TERMINAL, InvariantError, Job, QueueState, decide
-from .walk import classify, entries, files, remove_entry
+from .walk import classify, entries, files
 
 CHALLENGE_SECONDS = 15 * 60
 CLEANUP_BATCH = 200
@@ -146,8 +149,7 @@ class Broker:
             name = entry.path.name
             if entry.is_dir or entry.is_link or not name.startswith(".tmp-broker-") or name.startswith(own):
                 continue
-            assert_inside([self.root], entry.path)
-            os.unlink(entry.path)
+            fsops.unlink([self.root], entry.path)
 
     def _current_generation(self) -> int | None:
         names = self.markers.names("generation")
@@ -169,26 +171,17 @@ class Broker:
                 self._quarantine(old[self.replay.good_end :], f"gen-{self.generation}-tail")
         target = self.generation + 1
         path = layout.journal_path(self.root, target)
-        assert_inside([self.root], path)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
-        try:
-            view = memoryview(good)
-            while view:
-                view = view[os.write(fd, view) :]
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        fsops.write_new([self.root], path, good)
         last = self.replay.last_seq if self.replay else 0
         self.markers.publish("generation", (str(target),), {"from": self.generation}, last)
         self.generation = target
-        self.journal = Journal(path, last + 1, self.instance)
+        self.journal = Journal(path, last + 1, self.instance, [self.root])
 
     def _quarantine(self, data: bytes, name: str) -> Path:
         folder = self.root / layout.QUARANTINE / self.host.wall_time().replace(":", "-")
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / name
-        assert_inside([self.root], path)
-        path.write_bytes(data)
+        fsops.mkdir([self.root], folder)
+        path = folder / f"{name}-{secrets.token_hex(4)}"
+        fsops.write_new([self.root], path, data)
         return path
 
     def _record(self, kind: str, **fields: Any) -> dict[str, Any]:
@@ -341,22 +334,42 @@ class Broker:
                     unsafe(f"job {job_id}: launching without a marker and the workload cannot be ruled out")
 
     def _reconcile_renders(self, outcomes: list[str], add: Any, unsafe: Any) -> None:
+        """K-32, R005. Each published attempt is restored as may-have-printed. A grant authorizes exactly
+        one retry, and a retry consumes it, so only the latest attempt can hold a live grant. That grant
+        stands only with its readable published marker: a journal grant whose marker is unreadable or
+        missing is revoked, and nothing is ever granted from an unreadable marker."""
         for handoff in self.markers.names("render"):
             known = self.state.renders.get(handoff, 0)
-            released = set(self.state.undelivered.get(handoff, set()))
+            granted = set(self.state.undelivered.get(handoff, set()))
             for attempt in sorted(int(a) for a in self.markers.names("render", handoff) if a.isdigit()):
-                if attempt > known:
-                    add("render", hash=handoff, attempt=attempt, pane=None, session=None, restored=True)
-                    outcomes.append(f"render/{handoff}/{attempt}: may-have-printed")
-                    known = attempt
-                marker = self.markers.read("undelivered", handoff, str(attempt))
-                if isinstance(marker, Unreadable):
-                    unsafe(f"undelivered/{handoff}/{attempt}: unreadable; no retry until repaired")
-                    break
-                if isinstance(marker, dict) and attempt not in released:
-                    add("undelivered", hash=handoff, attempt=attempt)
-                    outcomes.append(f"undelivered/{handoff}/{attempt}: one retry authorized")
-                    released.add(attempt)
+                if attempt <= known:
+                    continue
+                if known and known not in granted:
+                    marker = self.markers.read("undelivered", handoff, str(known))
+                    if not isinstance(marker, dict):
+                        unsafe(
+                            f"render/{handoff}/{attempt}: published without a readable grant "
+                            f"for attempt {known}"
+                        )
+                        break
+                    add("undelivered", hash=handoff, attempt=known)
+                    granted.add(known)
+                add("render", hash=handoff, attempt=attempt, pane=None, session=None, restored=True)
+                outcomes.append(f"render/{handoff}/{attempt}: may-have-printed")
+                granted.discard(known)
+                known = attempt
+            if not known:
+                continue
+            marker = self.markers.read("undelivered", handoff, str(known))
+            if isinstance(marker, dict):
+                if known not in granted:
+                    add("undelivered", hash=handoff, attempt=known)
+                    outcomes.append(f"undelivered/{handoff}/{known}: one retry authorized")
+                continue
+            if known in granted:
+                add("undelivered-revoked", hash=handoff, attempt=known)
+            if isinstance(marker, Unreadable) or known in granted:
+                unsafe(f"undelivered/{handoff}/{known}: authorization not readable; no retry until repaired")
 
     def _reconcile_policies(self, outcomes: list[str], add: Any, unsafe: Any) -> None:
         current = self.state.policy_version or 0
@@ -412,21 +425,24 @@ class Broker:
         add("launching", job_id=job_id, restored=True)
         add("uncertain", job_id=job_id, reason=why, extent_known=False)
 
-    def _workload(self, spec: dict[str, Any]) -> bool | None:
-        """True if any process of the job's group or any container with its label is running. A group that
-        cannot be inspected counts as ended only when the runner's result file exists: the runner writes it
-        only after every other process of its job has exited."""
+    def _workload(self, spec: dict[str, Any], runner: dict[str, Any] | None = None) -> bool | None:
+        """True if any process of the job's group, the recorded runner or stray process, or any container
+        with its label is running; None if any of these cannot be established (K-36). A group that cannot
+        be inspected counts as ended only when the runner's result records a verified drain (`drained:
+        true`), which the runner writes only after a successful accounting query showed it alone in its
+        job (PROC-KIT-P3B-R002)."""
         active = self.host.group_active(str(spec.get("group", "")))
-        if (
-            active is None
-            and spec.get("job_id") is not None
-            and self._read_result(int(spec["job_id"])) is not None
-        ):
-            active = False
+        if active is None and spec.get("job_id") is not None:
+            result = self._read_result(int(spec["job_id"]))
+            if result is not None and result.get("drained") is True:
+                active = False
+        alive: bool | None = False
+        if runner:
+            alive = self.host.process_alive(ProcessIdentity(int(runner["pid"]), int(runner["start"])))
         containers = self.host.containers_running(str(spec.get("job_label", "")))
-        if active is None or containers is None:
+        if active is None or containers is None or alive is None:
             return None
-        return bool(active or containers)
+        return bool(active or containers or alive)
 
     def copy_extent(self, copy_id: str, job_id: int) -> str:
         """K-39: `registered` (untouched), `cleaning` (every missing entry has a marker; some entries may be
@@ -512,24 +528,28 @@ class Broker:
             if request.get("request_id") != request_id:
                 self._reject_file(path, request_id, "request id does not match its file name")
                 continue
+            problem = malformed(request)
+            if problem is not None:  # R010: rejected alone, never raised, never dispatched
+                self._reject_file(path, request_id, f"malformed request: {problem}")
+                continue
             self._respond(request_id, self._handle(request))
-            assert_inside([self.root], path)
-            path.unlink()
+            fsops.unlink([self.root], path)
 
     def _reject_file(self, path: Path, request_id: str, reason: str) -> None:
         target = self.root / layout.REJECTED / f"{request_id}.req"
-        assert_inside([self.root], target)
-        assert_inside([self.root], path)
-        os.replace(path, target)
-        (self.root / layout.REJECTED / f"{request_id}.reason").write_text(reason, encoding="utf-8")
+        fsops.replace([self.root], path, target)
+        reason_path = self.root / layout.REJECTED / f"{request_id}.reason"
+        fsops.write_replace(
+            [self.root],
+            reason_path.with_name(f".tmp-broker-broker-{self.instance}-reason"),
+            reason_path,
+            reason.encode("utf-8"),
+        )
 
     def _respond(self, request_id: str, response: dict[str, Any]) -> None:
         final = self.root / layout.OUTBOX / f"{request_id}.res"
         temp = self.root / layout.OUTBOX / f".tmp-broker-broker-{self.instance}-{request_id}"
-        assert_inside([self.root], temp)
-        assert_inside([self.root], final)
-        temp.write_bytes(encode({"request_id": request_id, **response}))
-        os.replace(temp, final)
+        fsops.write_replace([self.root], temp, final, encode({"request_id": request_id, **response}))
 
     def _handle(self, request: dict[str, Any]) -> dict[str, Any]:
         kind = request.get("type")
@@ -581,6 +601,7 @@ class Broker:
             )
             if spec["class"] == "cleanup":
                 spec["leases"] = self._cleanup_leases(spec["copies"])
+            self._refuse_cleaned(spec)
         except SpecError as exc:
             self._record("reject", request_id=request_id, reason=str(exc))
             return {"ok": False, "error": str(exc)}
@@ -588,6 +609,15 @@ class Broker:
         self.markers.publish("accept", (request_id,), {"job_id": job_id, "spec": spec}, self._seq())
         self._record("accept", request_id=request_id, job_id=job_id, spec=spec)
         return {"ok": True, "job_id": job_id}
+
+    def _refuse_cleaned(self, spec: dict[str, Any]) -> None:
+        """Part C, K-19: while a cleanup job holds a resource, no new job may name it, at submit."""
+        for other in self.state.jobs.values():
+            if other.klass != "cleanup" or other.status in TERMINAL:
+                continue
+            clash = conflicts(other.leases(), [(str(p), str(m)) for p, m in spec["leases"]])
+            if clash:
+                raise SpecError(f"{clash[0][1]} is leased by cleanup job {other.job_id}")
 
     def _cleanup_leases(self, copies: list[str]) -> list[list[str]]:
         leases = []
@@ -741,6 +771,7 @@ class Broker:
             "scope": scope,
             "effect": effect,
             "expires_mono": self.host.monotonic() + CHALLENGE_SECONDS,
+            "boot": self.host.boot_id(),
         }
         if self.journal is not None:
             self._record("challenge", **record)
@@ -766,7 +797,8 @@ class Broker:
         challenge = match[0]
         if challenge["state"] != "open":
             return {"ok": False, "error": "challenge already used"}
-        if self.host.monotonic() > challenge["expires_mono"]:
+        boot = self.host.boot_id()
+        if boot is None or challenge.get("boot") != boot or self.host.monotonic() > challenge["expires_mono"]:
             return {"ok": False, "error": "challenge expired"}
         if challenge["scope"].get("generation") != self.generation:
             return {"ok": False, "error": "challenge belongs to another journal generation"}
@@ -829,7 +861,7 @@ class Broker:
                 continue
             if job.status == "launching" or not job.extent_known:
                 continue  # unknown extent: only inspected proof by repair, or an Owner release, resolves it
-            workload = self._workload(job.spec)
+            workload = self._workload(job.spec, job.runner if job.status == "uncertain" else None)
             if workload is None:
                 if job.status == "running":
                     self._record(
@@ -952,12 +984,24 @@ class Broker:
             )
             return
         job_dir = self.root / layout.JOBS / str(job.job_id)
-        job_dir.mkdir(parents=True, exist_ok=True)
-        (job_dir / "input").write_bytes(
-            encode({"argv": job.spec["argv"], "cwd": job.spec["run_dir"], "log": job.spec["log"]})
+        fsops.mkdir([self.root], job_dir)
+        fsops.write_replace(
+            [self.root],
+            job_dir / f".tmp-broker-broker-{self.instance}-input",
+            job_dir / "input",
+            encode(
+                {
+                    "argv": job.spec["argv"],
+                    "cwd": job.spec["run_dir"],
+                    "log": job.spec["log"],
+                    "roots": job.spec["roots"],
+                }
+            ),
         )
-        env = dict(os.environ)
-        env.update(job.spec["env"])
+        fsops.mkdir([Path(r) for r in job.spec["roots"]], Path(str(job.spec["tmp"])))
+        env = dict(
+            job.spec["env"]
+        )  # the frozen effective environment only (B-10, B-14); nothing inherited later
         env["MINION_JOB"] = job.spec["job_label"]
         env["MINION_JOB_GROUP"] = job.spec["group"]
         try:
@@ -970,9 +1014,19 @@ class Broker:
                 job.spec["group"],
             )
         except OSError as exc:
-            started = self._workload(job.spec)
+            stray = getattr(exc, "stray", None)
+            runner = {"pid": stray.pid, "start": stray.start} if stray is not None else None
+            started = self._workload(job.spec, runner)
             exists = self.host.group_exists(job.spec["group"])
-            if started is False and exists is False:
+            if runner is not None:
+                self._record(
+                    "uncertain",
+                    job_id=job.job_id,
+                    reason=f"spawn failed after creating process {runner['pid']}: {exc}",
+                    extent_known=True,
+                    runner=runner,
+                )
+            elif started is False and exists is False:
                 self._record("refused", job_id=job.job_id, reason=f"spawn failed before any workload: {exc}")
             else:
                 self._record(
@@ -1002,8 +1056,7 @@ class Broker:
                 if relative.startswith(".git/"):
                     continue
                 if any(fnmatch.fnmatch(relative, pattern) for pattern in job.spec["source_globs"]):
-                    assert_inside(roots, path)
-                    os.utime(path, None)
+                    fsops.utime(roots, path)
                     touched += 1
             return f"touch: {touched} workspace-member source files"
         workdir = Path(str(job.spec["workdir"]))
@@ -1027,19 +1080,37 @@ class Broker:
     # == cleanup (K-17 to K-19, K-39) =======================================================================
 
     def _cleanup_step(self, job: Job) -> None:
+        """Part C and K-17 to K-19. The full predicate conjunction is evaluated at every destructive
+        boundary: before the first batch, and again before each later one. A dry run (the default)
+        evaluates it, writes the report and removes nothing."""
+        refusal = self._cleanup_predicates(job)
+        if refusal:
+            self.cleanup_progress.pop(job.job_id, None)
+            self._record("ended", job_id=job.job_id, outcome="failed", eligible=False, reason=refusal)
+            return
         todo = self.cleanup_progress.get(job.job_id)
         if todo is None:
-            refusal = self._cleanup_references(job)
-            if refusal:
-                self._record("ended", job_id=job.job_id, outcome="failed", eligible=False, reason=refusal)
-                return
             todo = []
             for copy_id in job.spec["copies"]:
-                self._record("lease-transfer", copy_id=copy_id, to_job=job.job_id)
                 root = Path(self.state.copies[copy_id]["path"])
                 if os.path.lexists(root):
                     todo += [(copy_id, str(entry.path)) for entry in entries(root, bottom_up=True)]
                     todo.append((copy_id, str(root)))
+            if not job.spec.get("apply"):
+                report = self.root / layout.JOBS / str(job.job_id) / "report"
+                fsops.mkdir([self.root], report.parent)
+                lines = [f"would remove {path}" for _copy, path in todo] or ["nothing to remove"]
+                fsops.write_new([self.root], report, ("\n".join(lines) + "\n").encode("utf-8"))
+                self._record(
+                    "ended",
+                    job_id=job.job_id,
+                    outcome="dry-run",
+                    eligible=False,
+                    reason=f"dry run: {len(todo)} entries would be removed; report {report}",
+                )
+                return
+            for copy_id in job.spec["copies"]:
+                self._record("lease-transfer", copy_id=copy_id, to_job=job.job_id)
             self.cleanup_progress[job.job_id] = todo
         roots = [Path(r) for r in job.spec["roots"]]
         done = 0
@@ -1048,7 +1119,6 @@ class Broker:
             path = Path(text)
             copy_root = Path(self.state.copies[copy_id]["path"])
             relative = "." if path == copy_root else path.relative_to(copy_root).as_posix()
-            assert_inside(roots, path.parent if path != copy_root else path)
             seq = len(self.markers.names("cleanup", str(job.job_id))) + 1
             self.markers.publish(
                 "cleanup",
@@ -1056,7 +1126,11 @@ class Broker:
                 {"copy_id": copy_id, "path": relative},
                 self._seq(),
             )
-            remove_entry(classify(path))
+            entry = classify(path)
+            if entry.is_dir or entry.link_is_dir:
+                fsops.rmdir(roots, path)
+            else:
+                fsops.unlink(roots, path)
             todo.pop(0)
             done += 1
         if todo:
@@ -1075,15 +1149,57 @@ class Broker:
         )
         self.cleanup_progress.pop(job.job_id, None)
 
-    def _cleanup_references(self, job: Job) -> str | None:
-        """K-18: the reference set, evaluated at the destructive boundary. Unreadable means refuse."""
+    def _cleanup_predicates(self, job: Job) -> str | None:
+        """The Part C conjunction for every copy, with the K-18 reference set. Anything that cannot be
+        established refuses. Never an empty reference set by default."""
         try:
             profile = yaml.safe_load(Path(str(job.spec["profile"])).read_text(encoding="utf-8")) or {}
-            sources = list((profile.get("build_queue") or {}).get("reference_sources") or [])
         except (OSError, yaml.YAMLError) as exc:
-            return f"reference sources unreadable: {exc}"
+            return f"profile unreadable at the boundary: {exc}"
+        queue_cfg = profile.get("build_queue") or {}
+        references = queue_cfg.get("cleanup_references")
+        if not isinstance(references, dict) or not all(
+            k in references for k in ("work_packages", "incidents", "authority_cache")
+        ):
+            return (
+                "build_queue.cleanup_references must declare work_packages, incidents and "
+                "authority_cache (K-18)"
+            )
+        protected = [
+            canonical(str(t.get("path", "")))
+            for t in (queue_cfg.get("targets") or {}).values()
+            if isinstance(t, dict)
+        ]
+        protected += [canonical(str(p)) for p in (queue_cfg.get("caches") or {}).values()]
+        protected.append(canonical(self.root))
+        texts: list[tuple[str, str]] = []
+        command = references["work_packages"]
+        if not isinstance(command, list) or not command or not all(isinstance(a, str) for a in command):
+            return "cleanup_references.work_packages must be a command (argv list)"
+        try:
+            ran = subprocess.run(command, capture_output=True, text=True, timeout=300, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"open work package states unreadable: {exc}"
+        if ran.returncode != 0:
+            return f"open work package states unreadable: exit {ran.returncode}"
+        texts.append(("open work packages", ran.stdout))
+        for kind in ("incidents", "authority_cache"):
+            sources = references[kind]
+            if not isinstance(sources, list) or not sources:
+                return f"cleanup_references.{kind} must list at least one path"
+            for source in sources:
+                content = _read_all(Path(str(source)))
+                if content is None:
+                    return f"reference source unreadable: {source}"
+                texts.append((str(source), content))
         for copy_id in job.spec["copies"]:
-            path = str(self.state.copies[copy_id]["path"])
+            copy = self.state.copies[copy_id]
+            path = str(copy["path"])
+            canon = canonical(path)
+            if any(
+                canon == p or canon.startswith(p + os.sep) or p.startswith(canon + os.sep) for p in protected
+            ):
+                return f"copy {copy_id} overlaps a protected store (target, cache or the queue)"
             for other in self.state.jobs.values():
                 if other.job_id == job.job_id or other.status in TERMINAL:
                     continue
@@ -1094,23 +1210,30 @@ class Broker:
                         or path.startswith(lease_path + os.sep)
                     ):
                         return f"copy {copy_id} is referenced by job {other.job_id} ({other.status})"
-            creator = self.state.jobs.get(int(self.state.copies[copy_id]["creator"]))
+            creator = self.state.jobs.get(int(copy["creator"]))
             if creator is not None and creator.retain:
                 return f"copy {copy_id} is retained by job {creator.job_id}"
-            for source in sources:
-                found = _mentions(Path(str(source)), path)
-                if found is None:
-                    return f"reference source unreadable: {source}"
-                if found:
-                    return f"copy {copy_id} is referenced in {source}"
+            for where, text in texts:
+                if path in text or canon in text.lower():
+                    return f"copy {copy_id} is referenced in {where}"
+            if copy.get("state") == "registered" and os.path.lexists(path):
+                clean = self.git.clean(Path(path))
+                if clean is not True:
+                    return f"copy {copy_id} is not a clean worktree (status {clean})"
+                unpushed = self.git.unpushed(Path(path))
+                if unpushed is None:
+                    return f"copy {copy_id}: remote reachability unknown"
+                if unpushed:
+                    return f"copy {copy_id} has {len(unpushed)} commit(s) not reachable from a remote ref"
         return None
 
 
-def _mentions(source: Path, needle: str) -> bool | None:
-    """Does any file under `source` mention `needle`? None if anything cannot be read (K-18)."""
+def _read_all(source: Path) -> str | None:
+    """All text under `source` (a file or a folder, never through a link); None if anything cannot be
+    read (K-18: unreadable means refuse, never an empty reference set)."""
     try:
-        targets = [source] if not source.is_dir() else list(files(source))
-        return any(needle in path.read_text(encoding="utf-8", errors="replace") for path in targets)
+        targets = list(files(source)) if source.is_dir() else [source]
+        return "\n".join(path.read_text(encoding="utf-8", errors="replace") for path in targets)
     except OSError:
         return None
 

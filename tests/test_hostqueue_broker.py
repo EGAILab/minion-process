@@ -122,13 +122,25 @@ def test_expired_and_stale_generation_challenges(tmp_path: Path) -> None:
 
 def test_jobspec_refusals(tmp_path: Path) -> None:
     w = make_world(tmp_path)
-    assert "unknown class" in w.request({"type": "submit", "class": "weird", "submitter": {}})["error"]
+    full = {
+        "profile": str(w.profile),
+        "launcher": "rust",
+        "target": "gate",
+        "checkout": str(w.root / "repo"),
+        "submitter": {"pane": "w1:p1", "session": "s1"},
+    }
+    assert "unknown class" in w.request({"type": "submit", "class": "weird", **full})["error"]
     assert (
         "profile unreadable"
-        in w.request({"type": "submit", "class": "build", "profile": str(tmp_path / "none.yaml")})["error"]
+        in w.request(
+            {"type": "submit", "class": "build", **{**full, "profile": str(tmp_path / "none.yaml")}}
+        )["error"]
     )
     assert "target 'missing'" in w.submit(target="missing")["error"]
-    assert "only a controls target" in w.submit("control", "gate", sha=SHA)["error"]
+    assert "controls-kind target" in w.submit("control", "gate", sha=SHA)["error"]
+    assert (
+        "controls-kind target" in w.submit("control", "reviewer", sha=SHA)["error"]
+    )  # R003: no reviewer gate cache
     assert "never use a controls target" in w.submit("build", "controls")["error"]
     assert (
         "belongs to claude, not codex" in w.submit("build", "reviewer", session="s2", pane="w1:p2")["error"]
@@ -137,18 +149,25 @@ def test_jobspec_refusals(tmp_path: Path) -> None:
     assert "does not match its pane" in w.submit(session="forged")["error"]
     assert "cannot be read" in w.submit(pane="w9:p9")["error"]
     assert (
-        "required"
-        in w.request({"type": "submit", "class": "build", "profile": str(w.profile), "submitter": {}})[
-            "error"
-        ]
+        "are required"
+        in w.request(
+            {
+                "type": "submit",
+                "class": "build",
+                "profile": str(w.profile),
+                "launcher": "rust",
+                "target": "gate",
+                "checkout": str(w.root / "repo"),
+                "submitter": {},
+            }
+        )["error"]
     )
     outside = w.submit(checkout=str(tmp_path / "elsewhere"))
     assert "not contained" in outside["error"]  # W-24
-    duplicate = client.put(w.queue, {"type": "submit", "class": "weird", "request_id": "fixed"})
+    client.put(w.queue, {"type": "submit", "class": "weird", "request_id": "fixed", **full})
     w.broker.step()
-    again = w.request({"type": "submit", "class": "build", "request_id": "fixed"})
+    again = w.request({"type": "submit", "class": "weird", "request_id": "fixed", **full})
     assert again["duplicate"] and "unknown class" in again["error"]
-    del duplicate
 
 
 def _edit_profile(w: World, edit: Any) -> None:
@@ -355,7 +374,16 @@ def test_inspection_failure_makes_a_running_job_uncertain(tmp_path: Path) -> Non
     assert w.job(job_id).status == "uncertain"
     w.broker.step()  # still unknown: stays uncertain
     assert w.job(job_id).status == "uncertain"
-    result(w, job_id)  # the runner drained and wrote its result: proof the group ended
+    result(w, job_id)  # a result without a verified drain proves nothing (R002)
+    w.broker.step()
+    assert w.job(job_id).status == "uncertain"
+    (w.queue / "jobs" / str(job_id) / "result").write_bytes(
+        encode({"exit": 0, "gate_end": 0, "drained": True})
+    )
+    w.broker.step()
+    assert w.job(job_id).status == "uncertain"  # the runner process itself is still alive
+    runner = w.host.spawned[-1]["runner"]
+    w.host.processes[(runner.pid, runner.start)] = False
     w.broker.step()
     assert w.job(job_id).status == "ended"
 
@@ -404,7 +432,8 @@ def test_stale_release_challenge(tmp_path: Path) -> None:
     challenge = w.request({"type": "release", "job_id": job_id})
     w.host.group_query_error = False
     result(w, job_id)
-    w.host.finish(w.job(job_id).spec["group"])
+    spawned = w.host.spawned[-1]
+    w.host.finish(spawned["group"], spawned["runner"])
     w.broker.step()  # proven ended meanwhile
     assert "stale" in w.confirm(challenge["code"])["error"]
 

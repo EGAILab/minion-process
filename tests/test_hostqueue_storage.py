@@ -230,8 +230,13 @@ def test_walk_never_follows_a_link_and_removes_only_the_link(tmp_path: Path) -> 
     bottom_up = [e.path.relative_to(root).as_posix() for e in walk.entries(root, bottom_up=True)]
     assert bottom_up.index("d/f.txt") < bottom_up.index("d")
     assert [p.name for p in walk.files(root)] == ["f.txt"]
+    from minion_process.hostqueue import fsops
+
     for entry in walk.entries(root, bottom_up=True):
-        walk.remove_entry(entry)
+        if entry.is_dir or entry.link_is_dir:
+            fsops.rmdir([tmp_path], entry.path)
+        else:
+            fsops.unlink([tmp_path], entry.path)
     assert not os.listdir(root) and (outside / "precious.txt").read_text() == "keep"
 
 
@@ -244,5 +249,7 @@ def test_walk_failure_propagates(tmp_path: Path) -> None:
 def test_walk_removes_a_file_symlink(tmp_path: Path) -> None:  # pragma: no cover - POSIX only
     (tmp_path / "t").write_text("x")
     os.symlink(tmp_path / "t", tmp_path / "s")
-    walk.remove_entry(walk.classify(tmp_path / "s"))
+    from minion_process.hostqueue import fsops
+
+    fsops.unlink([tmp_path], tmp_path / "s")
     assert (tmp_path / "t").exists() and not os.path.lexists(tmp_path / "s")

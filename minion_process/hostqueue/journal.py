@@ -8,11 +8,11 @@ offset, its reason and whether any valid record follows it (mid-journal) or not 
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import fsops
 from .framing import FramingError, decode_at, encode, next_valid_record
 
 
@@ -78,21 +78,14 @@ def parse(data: bytes) -> Replay:
 class Journal:
     """Appends to a journal whose current content has replayed without an anomaly."""
 
-    def __init__(self, path: Path, next_seq: int, instance: str) -> None:
+    def __init__(self, path: Path, next_seq: int, instance: str, roots: list[Path] | None = None) -> None:
         self.path = path
         self.next_seq = next_seq
         self.instance = instance
+        self.roots = roots if roots is not None else [path.parent.parent]
 
     def append(self, kind: str, **fields: Any) -> dict[str, Any]:
         record = {"seq": self.next_seq, "instance": self.instance, "kind": kind, **fields}
-        data = encode(record)
-        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o644)
-        try:
-            view = memoryview(data)
-            while view:  # a local regular file takes the whole record in one write; loop for exactness
-                view = view[os.write(fd, view) :]
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        fsops.append(self.roots, self.path, encode(record))
         self.next_seq += 1
         return record

@@ -16,8 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import layout
-from .contain import assert_inside
+from . import fsops, layout
 from .framing import FramingError, decode_single, encode
 
 CLIENT_TYPES = (
@@ -51,18 +50,8 @@ def put(queue: Path, request: dict[str, Any], *, _type_check: bool = True) -> st
     inbox = queue / layout.INBOX
     temp = inbox / f".tmp-client-{os.getpid()}-{secrets.token_hex(6)}"
     final = inbox / f"{request_id}.req"
-    assert_inside([queue], temp)
-    assert_inside([queue], final)
-    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
-    try:
-        view = memoryview(body)
-        while view:
-            view = view[os.write(fd, view) :]
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    assert_inside([queue], temp)
-    os.replace(temp, final)
+    fsops.write_new([queue], temp, body)
+    fsops.replace([queue], temp, final)
     return request_id
 
 
