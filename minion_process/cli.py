@@ -14,6 +14,11 @@
     python -m minion_process metrics <issue> [--out <file>]
     python -m minion_process merge <code|docs|owner/repo> <pr> <sha>
     python -m minion_process comment <code|docs|owner/repo> <number> <file> [--pr]
+    python -m minion_process build <verb> ...   (see `minion_process.hostqueue.commands`)
+    python -m minion_process session start --profile <profile.yaml> --agent <claude|codex> [--out <file>]
+    python -m minion_process faults check <matrix.yaml>
+    python -m minion_process dispatch <issue> --queue <dir> --pane <pane> --session <id>
+                                     [--mark-undelivered HASH:N]
 
 A patch file for `apply` defines `apply(workflow)` (mutates it; may return replacement prose) and
 `ALLOWED` (the set of top-level workflow keys it may change)."""
@@ -21,6 +26,7 @@ A patch file for `apply` defines `apply(workflow)` (mutates it; may return repla
 from __future__ import annotations
 
 import argparse
+import json
 import runpy
 import sys
 from pathlib import Path
@@ -31,6 +37,7 @@ import yaml
 from .composite import close as composite_close
 from .composite import handoff as composite_handoff
 from .github import CODE_REPO, REPOS, GitHub
+from .hostqueue import commands as hostqueue_commands
 from .model import BodyFormatError, candidates, split_body
 from .ops import (
     CheckFailed,
@@ -136,6 +143,13 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
     comment.add_argument("number", type=int)
     comment.add_argument("file")
     comment.add_argument("--pr", action="store_true")
+    hostqueue_commands.add_parsers(sub)
+    dispatch = sub.add_parser("dispatch")
+    dispatch.add_argument("issue", type=int)
+    dispatch.add_argument("--queue", required=True)
+    dispatch.add_argument("--pane", required=True)
+    dispatch.add_argument("--session", required=True)
+    dispatch.add_argument("--mark-undelivered", metavar="HASH:ATTEMPT")
     args = parser.parse_args(argv)
 
     if args.command == "profile":  # offline: no `gh`, no network
@@ -165,7 +179,62 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
         print("INVALID" if errors(problems) else "VALID")
         return 1 if errors(problems) else 0
 
+    if args.command == "build":  # offline: the queue folder only
+        return hostqueue_commands.run_build(args)
+    if args.command == "faults":  # offline
+        return hostqueue_commands.run_faults(args)
+
     gh = gh or GitHub()
+
+    if args.command == "session":
+        client = gh
+
+        def issues() -> list[dict[str, Any]]:
+            found = []
+            for issue in client.open_issues(args.repo):
+                try:
+                    workflow = split_body(issue["body"]).workflow
+                except BodyFormatError:
+                    continue
+                found.append(
+                    {
+                        "issue": issue["number"],
+                        "work_package": workflow.get("work_package"),
+                        "next_owner": workflow.get("next_owner"),
+                        "status": workflow.get("status"),
+                    }
+                )
+            return found
+
+        return hostqueue_commands.run_session(args, issues)
+    if args.command == "dispatch":
+        queue = Path(args.queue)
+        try:
+            if args.mark_undelivered:
+                handoff, _, attempt = args.mark_undelivered.partition(":")
+                response = hostqueue_commands.mark_undelivered(queue, handoff, int(attempt), args.session)
+            else:
+                report = handoff_report(gh, args.repo, args.issue)
+                if report.failed:
+                    for label in report.failed:
+                        print(f"  FAIL {label}")
+                    print("HANDOFF_BLOCKED")
+                    return 1
+                workflow = split_body(gh.issue(args.repo, args.issue)["body"]).workflow
+                text = hostqueue_commands.render_handoff(workflow, args.pane)
+                response = hostqueue_commands.dispatch_print(queue, text, args.pane, args.session)
+        except hostqueue_commands.client.Unavailable as exc:
+            print(f"UNAVAILABLE: {exc}")
+            return 3
+        if response.get("ok") and "text" in response:
+            print(response["text"])
+            print(
+                f"-- render {response['hash']} attempt {response['attempt']}: may-have-printed; "
+                "delivery is the project's helper, never the kit (K-1)"
+            )
+            return 0
+        print(json.dumps(response, indent=2, sort_keys=True))
+        return 0 if response.get("ok") else 1
 
     try:
         if args.command == "transition-check":

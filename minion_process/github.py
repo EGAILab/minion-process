@@ -129,6 +129,14 @@ class GitHub:
                 )
         return comments
 
+    def open_issues(self, repo: str) -> list[dict[str, Any]]:
+        """Open issues with their bodies (for `session start`'s work-package list)."""
+        fields = "number,title,body"
+        args = ["issue", "list", "-R", repo, "--state", "open", "--limit", "200", "--json", fields]
+        out = self._run(args, None)
+        data: list[dict[str, Any]] = json.loads(out)
+        return data
+
     def close_issue(self, repo: str, number: int, comment: str) -> None:
         self._run(
             ["issue", "close", str(number), "-R", repo, "--reason", "completed", "--comment", comment], None
