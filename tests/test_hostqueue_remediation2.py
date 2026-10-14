@@ -1259,7 +1259,8 @@ def test_c24b_control_recording_the_confirmation_as_proof(
 def test_c24c_control_restoring_an_ambiguous_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Row c: an override recorded under another generation is restored anyway.
+    # Row b (confirmation marker unreadable): the ambiguous override is restored anyway. The exact row-c
+    # control is test_c24c_control_omitting_only_the_generation_refusal (N001, round 17).
     w = make_world(tmp_path)
     e, r, code, cid = _confirmed(w)
     w.confirm(code)

@@ -70,6 +70,8 @@ def decode_at(data: bytes, offset: int) -> Decoded:
         payload = json.loads(body.decode("ascii"))
     except (UnicodeDecodeError, ValueError):
         raise FramingError("payload is not JSON") from None
+    except RecursionError:  # data-triggered: nesting deeper than the decoder can follow (R010)
+        raise FramingError("payload nesting is too deep to decode") from None
     if not isinstance(payload, dict):
         raise FramingError("payload is not an object")
     return Decoded(payload, body_start + length + len(COMMIT))

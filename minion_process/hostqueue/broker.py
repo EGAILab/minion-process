@@ -476,9 +476,10 @@ class Broker:
     def _workload(self, spec: dict[str, Any], runner: dict[str, Any] | None = None) -> bool | None:
         """True if any process of the job's group, the recorded runner or stray process, or any container
         with its label is running; None if any of these cannot be established (K-36). A group that cannot
-        be inspected counts as ended only when the runner's result records a verified drain (`drained:
+        be inspected counts as drained only when the runner's result records a verified drain (`drained:
         true`), which the runner writes only after a successful accounting query showed it alone in its
-        job (PROC-KIT-P3B-R002)."""
+        job. That drain says nothing about the runner itself, which writes its result before it exits, so
+        the recorded runner is always observed too (PROC-KIT-P3B-R002, K-41)."""
         active = self.host.group_active(str(spec.get("group", "")))
         if active is None and spec.get("job_id") is not None:
             result = self._read_result(int(spec["job_id"]))
@@ -885,7 +886,9 @@ class Broker:
         for job in list(self.state.active()):
             if job.status == "launching" or not job.extent_known:
                 continue  # unknown extent: only inspected proof by repair, or an Owner release, resolves it
-            workload = self._workload(job.spec, job.runner if job.status == "uncertain" else None)
+            # R002: the recorded runner or stray identity is part of the end proof in every active state. A
+            # verified drain shows only that the runner was alone in its group, not that it exited.
+            workload = self._workload(job.spec, job.runner)
             if workload is None:
                 if job.status == "running":
                     self._record(

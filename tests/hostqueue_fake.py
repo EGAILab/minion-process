@@ -27,6 +27,7 @@ class FakeHost:
     spawned: list[dict[str, Any]] = field(default_factory=list)
     spawn_error: OSError | None = None
     spawn_creates_group: bool = True
+    spawn_birth_unknown: bool = False  # the birth query failed at spawn (K-41)
     next_pid: int = 5000
     publish_calls: list[Path] = field(default_factory=list)
     group_query_error: bool = False
@@ -63,7 +64,7 @@ class FakeHost:
         if self.spawn_error is not None:
             raise self.spawn_error
         self.next_pid += 1
-        ident = ProcessIdentity(self.next_pid, 77)
+        ident = ProcessIdentity(self.next_pid, None if self.spawn_birth_unknown else 77)
         self.processes[(ident.pid, ident.start)] = True
         self.spawned.append(
             {"argv": argv, "env": env, "cwd": cwd, "log": log, "group": group, "runner": ident}
@@ -84,10 +85,11 @@ class FakeHost:
         return self.containers.get(label, False)
 
     def finish(self, group: str, runner: ProcessIdentity | None = None) -> None:
-        """The workload ends: the group empties and the runner exits."""
+        """The workload ends: the group empties, and the runner it spawned (or the one named) exits."""
         self.groups[group] = False
-        if runner is not None:
-            self.processes[(runner.pid, runner.start)] = False
+        ended = [s["runner"] for s in self.spawned if s["group"] == group]
+        for ident in [*ended, *([runner] if runner is not None else [])]:
+            self.processes[(ident.pid, ident.start)] = False
 
     # -- memory, clock, volume --------------------------------------------------------------------------
     def free_memory_bytes(self) -> int | None:

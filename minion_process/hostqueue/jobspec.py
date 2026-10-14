@@ -27,6 +27,8 @@ receives:
 - **Writable-location variables** (`WRITABLE_LOCATION`) are set only by the kit, from `target_env`,
   `cache_env` and the job's temporary folder. Variable names are compared case-insensitively; two names
   that differ only by case are refused.
+- **Inherited variables** come from a closed allow-list of read-only classes (`INHERITABLE`). Any other
+  name in `inherit_env` is refused; a tool cache is bound through `cache_env` (R003).
 - **Leased resource spellings.** A leased path containing `=`, `;`, a quote, a backtick or a control
   character is refused, so it can never be put into a slot.
 - **Working folder.** Every job runs in a folder it leases exclusively: the execution worktree for
@@ -84,6 +86,38 @@ WRITABLE_LOCATION = frozenset(
     }
 )
 WRITABLE_PREFIXES = ("XDG_",)
+# R003: the inherited-variable domain is closed. A host variable is inherited only when the kit knows it as
+# one of these read-only classes. Every other name is refused, so a writable location (a tool cache such
+# as NODE_COMPILE_CACHE or PYTHONPYCACHEPREFIX) can never pass as a search value by being absent from a
+# list. A tool cache is bound to a declared, leased cache through `cache_env` instead.
+INHERITABLE: dict[str, tuple[str, ...]] = {
+    "search path": ("PATH", "PATHEXT"),
+    "read-only system location": (
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "COMSPEC",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "PROGRAMW6432",
+        "COMMONPROGRAMFILES",
+        "COMMONPROGRAMFILES(X86)",
+        "COMMONPROGRAMW6432",
+    ),
+    "host identity": (
+        "OS",
+        "COMPUTERNAME",
+        "USERNAME",
+        "USERDOMAIN",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "PROCESSOR_IDENTIFIER",
+        "PROCESSOR_LEVEL",
+        "PROCESSOR_REVISION",
+    ),
+    "locale": ("LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TZ"),
+}
+_INHERITABLE = frozenset(name for names in INHERITABLE.values() for name in names)
 KIT_VARIABLES = ("MINION_JOB", "MINION_JOB_GROUP")
 UNSUPPORTED_CLASSES = {"cleanup": "cleanup is not supported in 0.4.0"}  # K-47
 
@@ -394,8 +428,11 @@ def build_spec(
         raise SpecError("build_queue.inherit_env must be a list of variable names")
     for var in inherit:
         claim(var, "inherit_env")
-        if is_writable_location(str(var)):
-            raise SpecError(f"inherit_env may not name the writable-location variable {var} (K-42)")
+        if str(var).upper() not in _INHERITABLE:
+            raise SpecError(
+                f"inherit_env may name only a read-only search, system, identity or locale variable, not "
+                f"{var} (K-42, R003); bind a tool cache through cache_env"
+            )
         if var in os.environ:
             env[str(var)] = os.environ[var]  # read-only search paths, frozen at submit (B-10)
     globs = launcher.get("source_globs") or []

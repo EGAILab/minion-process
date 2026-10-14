@@ -19,9 +19,12 @@ host build queue.
    - Execution and log roots inside the project.
    - Targets with their kinds (`gate`, `controls`, `reviewer`) and reviewer owners.
    - Shared `caches`, such as the Cargo home.
-   - `inherit_env`: the only host variables a launcher inherits, as read-only search paths. The default
-     is `PATH`, `PATHEXT`, `SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR` and `COMSPEC`. It may not name a
-     writable-location variable (below).
+   - `inherit_env`: the only host variables a launcher inherits. The default is `PATH`, `PATHEXT`,
+     `SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR` and `COMSPEC`. The list is closed: it may name only a
+     read-only search path, a read-only system location (the Windows and Program Files folders), a
+     host identity value or a locale value (`jobspec.INHERITABLE`). Anything else is refused. A tool
+     cache such as `NODE_COMPILE_CACHE` or `PYTHONPYCACHEPREFIX` is bound to a declared cache through
+     `cache_env`.
 
    A leased path (root, target or cache) may not contain `=`, `;`, a quote, a backtick or a control
    character. `profile validate` refuses it. There is no `cleanup_references`: 0.4.0 has no cleanup.

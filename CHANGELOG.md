@@ -75,6 +75,14 @@ the Claude chat hook (`#223`); no cleanup class in 0.4.0 (`#223` issuecomment-61
     `damaged`, with `, absent` after a manual removal. A human-confirmed release is restored on recovery
     only from an intact record and never counts as workload-ended proof. An ambiguous one is not restored.
   - **K-45:** generated witness matrices and executed controls in `tests/test_hostqueue_remediation2.py`.
+- Implementation review round 17 remediation (`tests/test_hostqueue_remediation4.py`):
+  - **R002:** the recorded runner is observed in every active state. A verified drain shows only that
+    the runner was alone in its group; a job ends only once the runner itself is gone.
+  - **R003:** `inherit_env` is a closed allow-list of read-only classes: search paths, read-only system
+    locations, host identity and locale (`jobspec.INHERITABLE`). A tool cache such as
+    `NODE_COMPILE_CACHE` is bound through `cache_env`.
+  - **R010:** a decoding failure caused by the data (nesting deeper than the JSON decoder follows) is a
+    framing error, so the request is rejected alone and service continues.
 - Not in 0.4.0: a cleanup class (Owner decision, `#223`); automatic pane sending (deferred, K-4); the
   incident replay suite (P4).
 

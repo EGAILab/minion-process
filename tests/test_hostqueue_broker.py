@@ -366,6 +366,7 @@ def test_containers_count_as_workload(tmp_path: Path) -> None:
     spawned = w.host.spawned[-1]
     w.host.containers[w.job(job_id).spec["job_label"]] = True
     w.host.finish(spawned["group"], None)
+    w.host.processes[(spawned["runner"].pid, spawned["runner"].start)] = True  # the runner still waits
     w.broker.step()
     assert w.job(job_id).status == "running"
     w.host.containers[w.job(job_id).spec["job_label"]] = False
