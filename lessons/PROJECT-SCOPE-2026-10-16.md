@@ -28,5 +28,9 @@ PROC-KIT-ORCH opt-in of the first pilot project, recorded on `EGAILab/minion-age
   containment rule (`lessons/CONTAINMENT-2026-10-10.md`) forbids without the Owner.
 - **Reviewability.** Project-scope settings and memory can be committed, reviewed and rolled back with
   the project. User-level state is shared by every project and is invisible to a project's reviewer.
-- **Isolation between projects.** A memory or rule written for one project is loaded by every other
-  project on the host.
+- **One place per project.** Claude Code already loads its default auto-memory per repository, shared
+  by that repository's worktrees and subdirectories, even though it stores it under the user's home.
+  Moving it does not change which project loads it. It puts the files inside the project root, under the
+  containment rule and next to the project's other state.
+- **Truly user-wide items.** User-level instruction files, "always allow" command rules and user-level
+  hooks do affect every project. That is why PS-4 keeps project process rules out of them.

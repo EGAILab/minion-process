@@ -28,7 +28,7 @@ In this file:
 |---|---|---|
 | Instructions | `<root>/CLAUDE.md` or `<root>/.claude/CLAUDE.md` | `<root>/AGENTS.md` |
 | Settings | `<root>/.claude/settings.json`; per machine `<root>/.claude/settings.local.json` | `<root>/.codex/config.toml`, for the keys Codex accepts there (it reports the keys it ignores); the rest on the launch line (PS-5) |
-| Hooks | `<root>/.claude/hooks/`, registered in the project settings | `<root>/.codex/hooks` |
+| Hooks | scripts in `<root>/.claude/hooks/`, registered in the project settings | `<root>/.codex/hooks.json`, or inline hooks in the project config, with the scripts beside it. A hook runs only in a trusted project and after the Owner trusts the hook; Codex keeps that trust record at user level (PS-4) |
 | Skills, agents, commands | `<root>/.claude/skills/`, `agents/`, `commands/` | `<root>/.agents/skills`, `<root>/.codex/agents` |
 | MCP servers | `<root>/.mcp.json` | project config |
 | Auto memory | `<root>/.claude/memory/`, set with `autoMemoryDirectory` in the project settings | `<root>`-scoped notes; no user-level memory |
@@ -37,9 +37,13 @@ In this file:
 Notes:
 - `autoMemoryDirectory` takes an absolute path; Claude Code shows a trust warning at launch when a project
   sets it. The warning is expected.
-- A project's settings, hooks and the memory location are **Owner-controlled**: the project's guard
-  refuses tool writes to `<root>/.claude/settings*.json`, `<root>/.claude/hooks/` and
-  `<root>/.codex/config.toml`. A proposed change is committed for review and the Owner installs it.
+- A project's **control files** are Owner-controlled: `<root>/.claude/settings*.json`,
+  `<root>/.claude/hooks/`, `<root>/.codex/` and `<root>/.agents/`. They hold the hooks, the
+  sandbox-related settings and the memory location. The memory notes in `<root>/.claude/memory/` are not
+  control files and stay writable.
+- An agent never edits an installed control file. A proposed change is committed for review in the
+  project's repository (for example under `process/enforcement/`), and the Owner installs the reviewed
+  bytes. How each agent is held to this is PS-7.
 - A project-scope location that the tool version in use does not support is recorded in the project's
   opt-in, with the fallback. It is never silently replaced by a user-level write.
 
@@ -71,10 +75,18 @@ therefore given on the launch line, so no user-level config change is needed and
 
 ```text
 codex [resume <session-id>] -C <root> -s workspace-write -a on-request \
+  -c 'sandbox_workspace_write.writable_roots=[]' \
   -c sandbox_workspace_write.network_access=true \
   -c sandbox_workspace_write.exclude_tmpdir_env_var=true \
   -c sandbox_workspace_write.exclude_slash_tmp=true
 ```
+
+`writable_roots=[]` clears any additional writable roots inherited from the user or project config. A `-c`
+override replaces only the key it names, so `-s workspace-write` alone does not establish the set of
+writable roots. The flags are not evidence of the result. At adoption, and after each fresh launch or
+resume, the effective policy is checked: the sandbox mode and writable roots the session reports, and
+any active profile or other configuration layer. A write outside the root is then shown to be refused
+or asked of the Owner.
 
 `network_access` is on only when the project needs it (for example `git push` and `gh`). With
 `on-request`, a command that needs more is asked of the Owner. An Owner approval marked "always" is
@@ -90,8 +102,19 @@ records why PS-1 to PS-5 are not enough.
 ## PS-7. Enforcement
 
 - **Claude Code:** the project's `PreToolUse` guard refuses writes outside the root, which includes the
-  user-level folders, and refuses writes to its own settings, hooks and memory location setting.
-- **Codex:** the `workspace-write` sandbox with the root as the only writable root (PS-5).
+  user-level folders, and refuses writes to every control file (PS-2), Codex's included.
+- **Codex:** the `workspace-write` sandbox with the root as the only writable root, checked as in PS-5.
+  Codex itself protects `.codex/`, `.agents/` and `.git/` inside a writable root. It does **not** protect
+  Claude's control files, and Claude's hook does not see Codex's tools. Codex is held off
+  `<root>/.claude/settings*.json` and `<root>/.claude/hooks/` in one of two ways:
+  - by an Owner-applied operating-system deny-write on those paths for the sandbox, with its own denial
+    witness; or
+  - where none is applied, by the binding instruction only. That case is a gap recorded for the Owner,
+    not an enforced restriction.
+- **Witnesses at adoption, for each agent:**
+  - a refused write outside the root;
+  - a refused write to each control file the agent must not change, or the recorded gap;
+  - an allowed write to `<root>/.claude/memory/` and `<root>/.tmp/`.
 - On native Windows a shell command can reach paths a hook parser does not see. The guarantee there is
   the rule plus the hook; the gap is recorded in the project's opt-in.
 
@@ -103,5 +126,6 @@ records why PS-1 to PS-5 are not enough.
 3. Migrate existing auto-memory: after the Owner installs `autoMemoryDirectory`, the agent copies its
    memory files from the user-level folder into `<root>/.claude/memory/` (read outside, write inside) and
    lists them. The user-level copies are left for the Owner to remove.
-4. Install the guard and the Codex launch line (PS-7) as Owner actions, and run the guard's witness rows.
+4. The Owner installs the guard and the Codex launch line (PS-7). Then check the effective Codex policy
+   (PS-5), run both agents' witness rows (PS-7), and record any gap for the Owner.
 5. Record the result on the project's coordination issue.
