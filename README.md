@@ -19,6 +19,7 @@ coordination-state.md               the current-state model, invariants, transit
 consequence-classes.md              kinds, consequence predicates, who classifies, measured stage skips
 routing.md                          delegated routes RT-1..RT-6 (in force per profile delegation.routing)
 gate-tiers.md                       G0–G3 and the minimum tier per stage
+project-scope.md                    project scope by default: where agent settings, memory and temp live (PS-1..PS-7)
 finding-taxonomy.md                 generic finding classes; a profile supplies aliases
 authority-dependencies.md           pinned external authority dependencies (verify + execute, never trust)
 requirement-id-convention.md        stable requirement IDs as traceability keys

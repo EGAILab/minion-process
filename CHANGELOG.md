@@ -2,6 +2,19 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
+## 0.4.0 - project scope by default (unreleased)
+
+Normative kit change, ordered by the Owner on 2026-10-16 (`EGAILab/minion-agent#231`).
+
+- `project-scope.md`: PS-1 agents read and execute in the tools' user-level folders but never write
+  them; PS-2 the project-scope location of instructions, settings, hooks, skills, auto-memory
+  (`autoMemoryDirectory` to `<root>/.claude/memory/`) and temp for Claude Code and Codex; PS-3 temp,
+  caches and build outputs under `<root>/.tmp/`; PS-4 what stays user-level and who changes it; PS-5 the
+  Codex sandbox on the launch line; PS-6 full isolation only by Owner decision; PS-7 enforcement; an
+  adoption checklist.
+- `WORKFLOW.md` §9.8: one paragraph and the link.
+- `lessons/PROJECT-SCOPE-2026-10-16.md`: the Owner's words and the audit that led to the rule.
+
 ## 0.3.1 - lesson: shared build caches and mtime freshness (unreleased)
 
 Mechanical (CP-0) kit change from `EGAILab/minion-process#4`, proposed by the Minion-Agent consumer.
