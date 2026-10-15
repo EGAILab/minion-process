@@ -23,5 +23,6 @@ is mechanical, a replay test (`replay/`, P3).
 | `CONTAINMENT-2026-10-10` | §9.8 storage inside the project root; containment checks before destructive operations | Minion-Agent `CLAUDE.md` |
 | `PROC-KIT-ROUTE-BY-CONSEQUENCE` | §4.3 route by consequence class; measured stage skips; the no-new-evidence signal | retrospective record §6.2–§6.3 |
 | `SHARED-BUILD-CACHE-FRESHNESS-2026-10-13` | §9.8 shared build caches: fresh sources before every gate, a separate controls cache, one writer per cache, provenance | `EGAILab/minion-process#4` (Minion-Agent `#215`, `#209`) |
+| `PROJECT-SCOPE-2026-10-16` | §9.8 and `project-scope.md`: agent state and settings in the project root; user-level tool folders read and execute only | `EGAILab/minion-agent#231` (Owner, 2026-10-16) |
 
 Sources are `EGAILab/minion-agent-docs` `process/agent-workflow.md` at `dd9fd15` unless stated.
