@@ -27,7 +27,12 @@ The project's own rules still decide when it adopts. The kit never approves its 
    ```
 
    - It creates `<root>\.tmp\kit\0.4.0\venv` and installs the kit there.
-   - It redirects temp and the pip cache to `<root>\.tmp`, so nothing is written outside the root.
+   - Nothing is written outside the root:
+     - it refuses any junction or link below the root on the way to a destination, and inside the venv;
+     - temp and the pip cache are under `<root>\.tmp`;
+     - pip runs isolated, with every inherited `PIP_*` and Python path variable removed and no
+       configuration file loaded;
+     - it checks that the package is imported from the venv.
    - It copies `relaunch.ps1` to `<root>\.minion\` and writes `<root>\.minion\kit.json`.
    - A later version is installed beside the old one, and `kit.json` switches to it. Going back is
      re-running the script with the old version.
@@ -64,8 +69,15 @@ The project's own rules still decide when it adopts. The kit never approves its 
 
    - The launch line is the one in `project-scope.md` PS-5 for Codex, and the plain `claude --resume`
      for Claude, with the PS-3 environment.
-   - While the agent runs, a background job records the session id herdr reports for the pane in
-     `<root>\.tmp\sessions\<name>.json`. The next relaunch resumes that session without an id.
+   - An id given with `-Resume` is recorded first, with provenance `owner`.
+   - While the agent runs, a background job records the session id herdr reports, with provenance
+     `herdr`, in `<root>\.tmp\sessions\<name>.json`. The next relaunch resumes that session without
+     an id. An observation is recorded only when all of these hold:
+     - it is for this pane;
+     - it names this session's tool;
+     - its working folder is the project root;
+     - its id is neither the one the pane showed before the launch nor one already recorded.
+     Anything else is ignored, so a stale or foreign id never replaces a usable recorded one.
    - Without a recorded id, the plan is refused rather than starting a new session by accident. Pass
      `-Resume <id>` once, or `-Fresh` for a new session.
    - After a relaunch, the PS-5 effective-policy check still applies.

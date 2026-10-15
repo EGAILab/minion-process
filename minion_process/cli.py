@@ -31,7 +31,7 @@ import yaml
 from .composite import close as composite_close
 from .composite import handoff as composite_handoff
 from .github import CODE_REPO, REPOS, GitHub
-from .launch import LaunchError, plan, record
+from .launch import LaunchError, observe, plan, record
 from .model import BodyFormatError, candidates, split_body
 from .onboard import ManifestError, markdown, onboard
 from .ops import (
@@ -105,6 +105,10 @@ def _local(args: argparse.Namespace) -> int:
         if args.command == "launch-plan":
             print(plan(root, args.session, args.resume, args.fresh).as_json())
             return 0
+        if args.command == "session-observe":  # reads one `herdr agent get` result on stdin
+            recorded_id, reason = observe(root, args.session, sys.stdin.read(), args.pane, args.exclude)
+            print(recorded_id or f"NOT-RECORDED: {reason}")
+            return 0 if recorded_id else 2
         print(record(root, args.session, args.id))
         return 0
     except (LaunchError, ManifestError) as exc:
@@ -172,6 +176,11 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
     record_cmd.add_argument("--root", required=True)
     record_cmd.add_argument("session")
     record_cmd.add_argument("id")
+    observe_cmd = sub.add_parser("session-observe")
+    observe_cmd.add_argument("--root", required=True)
+    observe_cmd.add_argument("session")
+    observe_cmd.add_argument("--pane", required=True)
+    observe_cmd.add_argument("--exclude", action="append", default=[])
     comment = sub.add_parser("comment")
     comment.add_argument("repo")
     comment.add_argument("number", type=int)
@@ -206,7 +215,7 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
         print("INVALID" if errors(problems) else "VALID")
         return 1 if errors(problems) else 0
 
-    if args.command in ("onboard", "launch-plan", "session-record"):  # offline: no `gh`, no network
+    if args.command in ("onboard", "launch-plan", "session-record", "session-observe"):  # offline, no `gh`
         return _local(args)
 
     gh = gh or GitHub()

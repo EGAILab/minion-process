@@ -59,7 +59,7 @@ class Result:
 
 
 def version_key(value: str) -> tuple[int, int, int]:
-    m = SEMVER.match(value)
+    m = SEMVER.fullmatch(value)
     if m is None:
         raise ManifestError(f"not a MAJOR.MINOR.PATCH version: {value!r}")
     return int(m[1]), int(m[2]), int(m[3])
@@ -97,7 +97,7 @@ def _step(version: str, i: int, step: Any, seen: set[str]) -> None:
     where = f"{version}: steps[{i}]"
     if not isinstance(step, dict) or set(step) != {"id", "title", "actor", "applies", "check"}:
         raise ManifestError(f"{where}: a step has exactly id, title, actor, applies, check")
-    if not isinstance(step["id"], str) or STEP_ID.match(step["id"]) is None or step["id"] in seen:
+    if not isinstance(step["id"], str) or STEP_ID.fullmatch(step["id"]) is None or step["id"] in seen:
         raise ManifestError(f"{where}.id: must be a unique upper-case id")
     seen.add(step["id"])
     if not isinstance(step["title"], str) or not step["title"].strip():

@@ -15,7 +15,13 @@ default (fail closed).
 
 The session to resume is, in order: the `--resume` id; none with `--fresh`; the id recorded for this
 session in `<root>/.tmp/sessions/<name>.json`. Without any of them the plan is refused, so a relaunch
-never silently starts a new session in place of the one the Owner meant to continue."""
+never silently starts a new session in place of the one the Owner meant to continue.
+
+The recorded id has a provenance: `owner` (`session-record`, an id the Owner chose) or `herdr`
+(`session-observe`, an id herdr reported for the pane the session was launched in). An observation is
+recorded only when it names that pane, the session's tool and the project root as its working folder,
+and its id is not one the launch excluded: the id herdr reported for the pane before the launch, or
+the id already recorded by this launch. Anything else is ignored, never written."""
 
 from __future__ import annotations
 
@@ -113,7 +119,7 @@ def load_sessions(root: Path) -> dict[str, dict[str, Any]]:
 
 def _entry(name: Any, entry: Any) -> None:
     where = f"sessions.{name}"
-    if not isinstance(name, str) or NAME.match(name) is None:
+    if not isinstance(name, str) or NAME.fullmatch(name) is None:
         raise LaunchError(f"{where}: a session name is lower-case letters, digits and '-'")
     if not isinstance(entry, dict) or not set(entry) <= {"tool", "network", "env"}:
         raise LaunchError(f"{where}: must be a mapping of tool, network, env")
@@ -128,13 +134,13 @@ def _entry(name: Any, entry: Any) -> None:
     if not isinstance(env, dict):
         raise LaunchError(f"{where}.env: must be a mapping")
     for key, value in env.items():
-        if not isinstance(key, str) or ENV_NAME.match(key) is None or key in RESERVED_ENV:
+        if not isinstance(key, str) or ENV_NAME.fullmatch(key) is None or key in RESERVED_ENV:
             raise LaunchError(f"{where}.env: {key!r} is not an allowed variable name")
         relative(value, f"{where}.env.{key}")
 
 
 def session_id(value: str, where: str) -> str:
-    if SESSION_ID.match(value) is None:
+    if SESSION_ID.fullmatch(value) is None:
         raise LaunchError(f"{where}: not a session id: {value!r}")
     return value
 
@@ -192,7 +198,7 @@ def plan(root: Path, name: str, resume: str | None = None, fresh: bool = False) 
     return Plan(name, entry["tool"], str(base), env, argv, chosen, state)
 
 
-def record(root: Path, name: str, value: str) -> Path:
+def record(root: Path, name: str, value: str, provenance: dict[str, str] | None = None) -> Path:
     """Write `<root>/.tmp/sessions/<name>.json` atomically, for the next relaunch."""
     if name not in load_sessions(root):
         raise LaunchError(f"no session {name!r} in {SESSIONS_FILE}")
@@ -200,6 +206,40 @@ def record(root: Path, name: str, value: str) -> Path:
     target = inside(root, STATE_DIR / f"{name}.json")
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = inside(root, STATE_DIR / f".{name}.json.{os.getpid()}.tmp")
-    temp.write_text(json.dumps({"session": value}) + "\n", encoding="utf-8")
+    body = {"session": value, **(provenance or {"source": "owner"})}
+    temp.write_text(json.dumps(body, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(temp, target)
     return target
+
+
+def observe(root: Path, name: str, text: str, pane: str, exclude: list[str]) -> tuple[str | None, str]:
+    """Record the id in one `herdr agent get <pane>` result if it belongs to this launch (see the module
+    note). Returns the recorded id, or None and the reason nothing was written."""
+    sessions = load_sessions(root)
+    if name not in sessions:
+        raise LaunchError(f"no session {name!r} in {SESSIONS_FILE}")
+    tool = sessions[name]["tool"]
+    try:
+        agent = json.loads(text)["result"]["agent"]
+        seen = {
+            "pane": agent["pane_id"],
+            "tool": agent["agent"],
+            "cwd": agent["cwd"],
+            "id": (agent.get("agent_session") or {}).get("value"),
+        }
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None, "not a herdr agent observation"
+    if not all(isinstance(v, str) for v in seen.values()):
+        return None, "no session id observed yet"
+    if seen["pane"] != pane:
+        return None, f"observation is for pane {seen['pane']!r}, not {pane!r}"
+    if seen["tool"] != tool:
+        return None, f"pane runs {seen['tool']!r}, session {name!r} is {tool!r}"
+    if os.path.normcase(str(Path(seen["cwd"]).resolve())) != os.path.normcase(str(root.resolve())):
+        return None, f"pane works in {seen['cwd']!r}, not the project root"
+    if seen["id"] in exclude:
+        return None, "id was excluded for this launch (pre-launch or already recorded)"
+    if SESSION_ID.fullmatch(seen["id"]) is None:
+        return None, "observed id is not a session id"
+    record(root, name, seen["id"], {"source": "herdr", "pane": pane, "tool": tool})
+    return seen["id"], "recorded"

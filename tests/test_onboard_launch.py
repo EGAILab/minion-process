@@ -93,7 +93,7 @@ def test_claude_plan(root: Path) -> None:
 
 def test_recorded_session_is_resumed_and_explicit_wins(root: Path) -> None:
     written = record(root, "review", UUID)
-    assert json.loads(written.read_text(encoding="utf-8")) == {"session": UUID}
+    assert json.loads(written.read_text(encoding="utf-8")) == {"session": UUID, "source": "owner"}
     assert plan(root, "review").resume == UUID
     other = "d38a7a9e-4b92-4b3d-b93a-f8a20a35644b"
     assert plan(root, "review", resume=other).resume == other
