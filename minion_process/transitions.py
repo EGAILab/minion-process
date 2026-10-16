@@ -31,6 +31,7 @@ LEGAL: dict[str, frozenset[str]] = {
             "FINAL_CONTRACT_REVIEW",  # this review was a targeted re-review of a remediated candidate
             "REMEDIATION",
             "CONTRACT_CONVERGENCE",
+            "CLOSED",  # a process/status WP, clean first review approved and merged (§10.2a; ops guard)
         }
     ),
     "REMEDIATION": frozenset({"IMPLEMENTATION_REVIEW", "CONTRACT_CONVERGENCE"}),

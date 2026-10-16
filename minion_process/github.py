@@ -38,14 +38,16 @@ class GitHub:
         data: dict[str, Any] = json.loads(out)
         return data
 
-    def issue_revisions(self, repo: str, number: int) -> list[tuple[str, str]]:
-        """The issue body's edit history from GitHub itself, newest first: (revision id, full body)."""
+    def issue_revisions(self, repo: str, number: int) -> list[tuple[str, str | None]]:
+        """The issue body's edit history from GitHub itself, newest first: (revision id, full body). The
+        schema's `diff` is nullable; an edit whose body GitHub does not return is kept with `None`, so a
+        caller can tell an unreadable revision from no revision (KIT-032-R001)."""
         owner, name = repo.split("/", 1)
         query = (
             "query($o:String!,$n:String!,$i:Int!,$c:String){repository(owner:$o,name:$n){issue(number:$i)"
             "{userContentEdits(first:100,after:$c){pageInfo{hasNextPage endCursor}nodes{id diff}}}}}"
         )
-        revisions: list[tuple[str, str]] = []
+        revisions: list[tuple[str, str | None]] = []
         cursor: str | None = None
         while True:
             args = [
@@ -64,7 +66,8 @@ class GitHub:
                 args += ["-F", f"c={cursor}"]
             page = json.loads(self._run(args, None))["data"]["repository"]["issue"]["userContentEdits"]
             revisions += [
-                (node["id"], node["diff"]) for node in page["nodes"] if isinstance(node.get("diff"), str)
+                (node["id"], node["diff"] if isinstance(node.get("diff"), str) else None)
+                for node in page["nodes"]
             ]
             if not page["pageInfo"]["hasNextPage"]:
                 return revisions

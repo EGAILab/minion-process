@@ -1,0 +1,10 @@
+version: 0.4.1
+summary: >-
+  The 0.3.2 closure route carried into the 0.4 line: a guarded IMPLEMENTATION_REVIEW -> CLOSED for a
+  clean process or status WP (coordination-state.md §10.2a, WORKFLOW.md §11.4 and §12.6).
+steps:
+  - id: PROFILE-PIN
+    title: the profile's kit.version is raised to 0.4.1 through the project's own review
+    actor: agent
+    applies: all
+    check: {kind: manual}
