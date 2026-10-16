@@ -4,11 +4,13 @@ issuecomment-6209854474). One refusal witness per guard clause; every refusal ma
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from minion_process.cli import main
 from minion_process.composite import close as composite_close
 from minion_process.github import GitHub
 from minion_process.model import render_body, split_body
@@ -92,7 +94,19 @@ def _fake(
     return fake
 
 
-ALLOWED = {"status", "next_owner", "next_action", "requirements", "open_findings", "kind", "docs", "code"}
+ALLOWED = {
+    "status",
+    "next_owner",
+    "next_action",
+    "requirements",
+    "open_findings",
+    "provisionally_closed",
+    "convergence",
+    "kind",
+    "work_package",
+    "docs",
+    "code",
+}
 
 
 def _close(fake: FakeGitHub, extra: dict[str, Any] | None = None) -> None:
@@ -276,3 +290,131 @@ def test_the_other_closure_routes_are_not_widened() -> None:
     assert check_transition("BLOCKED_FOR_OWNER", "CLOSED") is not None
     assert check_transition("FINAL_CONTRACT_REVIEW", "CLOSED") is None
     assert check_transition("CLOSURE_REVIEW", "CLOSED") is None
+
+
+# --- KIT-032-R001: the approval source is bound to the current identity and the issue's history ---------
+
+
+def _merged_pr(head: str, merge: str) -> dict[str, Any]:
+    return {"state": "MERGED", "mergeCommit": {"oid": merge}, "headRefOid": head, "isDraft": False}
+
+
+def _apply(fake: FakeGitHub, tmp_path: Path, patch: str) -> int:
+    path = tmp_path / "close.py"
+    body = f"ALLOWED = {sorted(ALLOWED)!r}\ndef apply(w):\n    w['status'] = 'CLOSED'\n{patch}"
+    path.write_text(body, encoding="utf-8")
+    return main(["apply", "10", str(path)], gh=GitHub(fake.run))
+
+
+def test_r001_a_closing_patch_cannot_borrow_another_wps_approval(tmp_path: Path) -> None:
+    foreign = [_comment(_header(wp="WP-Y"), 1)]
+    fake = _fake(_wp(), reviews=foreign)
+    with pytest.raises(CheckFailed, match="none found"):  # control: the unchanged context refuses
+        _close(fake)
+    with pytest.raises(CheckFailed, match="may not change work_package"):
+        _close(fake, {"work_package": "WP-Y"})
+    assert _apply(fake, tmp_path, "    w['work_package'] = 'WP-Y'\n") == 1
+    assert fake.edits == 0
+
+
+def test_r001_a_closing_patch_cannot_repoint_the_pr_to_hide_a_later_rejection(tmp_path: Path) -> None:
+    fake = _fake(_wp())
+    fake.issue_comments[(DOCS, 312)] = [_comment(_header(verdict="CHANGES_REQUESTED", round=2), 9, LATER)]
+    fake.prs[(DOCS, 313)] = _merged_pr(SHA_B, MERGED)
+    with pytest.raises(CheckFailed, match="not a complete APPROVED"):  # control
+        _close(fake)
+    repoint = {"docs": {"pr": 313, "sha": SHA_B, "base": "master", "merged_sha": MERGED}}
+    with pytest.raises(CheckFailed, match="changed the candidate"):
+        _close(fake, repoint)
+    assert _apply(fake, tmp_path, "    w['docs']['pr'] = 313\n") == 1
+    assert fake.edits == 0
+
+
+def _revision(state: dict[str, Any]) -> str:
+    return render_body({"workflow": state}, "")
+
+
+def test_r001_an_earlier_ordinary_repoint_does_not_hide_the_earlier_prs_rejection() -> None:
+    """Two-step variant: the PR was re-pointed by an earlier ordinary patch; the edit history still names
+    PR #312, so its later rejection is read."""
+    current = _wp(docs={"pr": 313, "sha": SHA_B, "base": "master", "merged_sha": MERGED})
+    fake = _fake(current)
+    fake.prs[(DOCS, 313)] = _merged_pr(SHA_B, MERGED)
+    fake.issue_comments[(DOCS, 312)] = [_comment(_header(verdict="CHANGES_REQUESTED", round=2), 9, LATER)]
+    fake.revisions[(CODE, 10)] = [("r2", _revision(current)), ("r1", _revision(_wp()))]
+    with pytest.raises(CheckFailed, match="not a complete APPROVED"):
+        _close(fake)
+    assert fake.edits == 0
+    fake.revisions[(CODE, 10)] = [("r2", _revision(current))]  # control: no history of #312
+    _close(fake)
+    assert fake.edits == 1
+
+
+def test_r001_an_earlier_identity_change_cannot_borrow_an_approval() -> None:
+    fake = _fake(_wp(), reviews=[_comment(_header(), 1)])
+    fake.revisions[(CODE, 10)] = [("r1", _revision(_wp(work_package="WP-Y")))]
+    with pytest.raises(CheckFailed, match="identity change cannot borrow"):
+        _close(fake)
+    assert fake.edits == 0
+
+
+def test_r001_an_unreadable_history_or_historical_candidate_refuses() -> None:
+    fake = _fake(_wp())
+    fake.history_fails = True
+    with pytest.raises(CheckFailed, match="edit history"):
+        _close(fake)
+    fake = _fake(_wp())
+    fake.revisions[(CODE, 10)] = [("r1", _revision(_wp(docs={"pr": "abc", "sha": SHA_B})))]
+    with pytest.raises(CheckFailed, match="cannot read"):
+        _close(fake)
+    assert fake.edits == 0
+
+
+def test_r001_a_history_with_the_same_identity_and_prose_only_revisions_still_closes() -> None:
+    fake = _fake(_wp())
+    fake.revisions[(CODE, 10)] = [("r2", _revision(_wp())), ("r1", "prose before the state block\n")]
+    _close(fake)
+    assert fake.edits == 1
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"code": {"pr": 9, "sha": SHA_A, "base": "main", "merged_sha": OTHER}},
+        {"docs": {"pr": 312, "sha": SHA_B, "base": "main", "merged_sha": MERGED}},
+        {"docs": {"pr": 312, "sha": SHA_B, "base": "master", "merged_sha": OTHER}},
+    ],
+    ids=["adds-a-side", "changes-base", "changes-recorded-merged-sha"],
+)
+def test_r001_the_closing_patch_keeps_every_candidate_field_but_merged_sha(patch: dict[str, Any]) -> None:
+    fake = _fake(_wp())
+    with pytest.raises(CheckFailed, match="changed the candidate"):
+        _close(fake, patch)
+    assert fake.edits == 0
+
+
+# --- KIT-032-R002: findings in every admitted location -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("state", "patch"),
+    [
+        ({"convergence": {"open_findings": ["WP-X-R001"]}}, None),
+        ({"convergence": {"open_findings": ["WP-X-R001"]}}, {"convergence": {"open_findings": []}}),
+        ({}, {"convergence": {"open_findings": ["WP-X-R001"]}}),
+        ({"provisionally_closed": ["WP-X-R001"]}, None),
+        ({"convergence": {"provisionally_closed": ["WP-X-R001"]}}, None),
+    ],
+    ids=["conv-retained", "conv-cleared", "conv-added", "provisional", "conv-provisional"],
+)
+def test_r002_findings_in_any_location_refuse(state: dict[str, Any], patch: dict[str, Any] | None) -> None:
+    fake = _fake(_wp(**state))
+    with pytest.raises(CheckFailed, match="open findings"):
+        _close(fake, patch)
+    assert fake.edits == 0
+
+
+def test_r002_an_empty_convergence_record_still_closes() -> None:
+    fake = _fake(_wp(convergence={"open_findings": [], "provisionally_closed": []}))
+    _close(fake)
+    assert fake.edits == 1

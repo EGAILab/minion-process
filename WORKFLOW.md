@@ -979,9 +979,11 @@ route applies (route detection uses whether a convergence record exists for the 
 the episode is "active", `coordination-state.md` §6, §11); a transition to the second implementation
 before the shared contract is approved and merged; a provisional closure without its negative-control
 evidence (§11.8.7.1); an `IMPLEMENTATION_REVIEW -> CLOSED` transition for any WP that is not an explicit
-`process`/`status` kind with `requirements: []`, has an open finding, lacks a latest published complete
-APPROVED review of the exact final candidate, or has a candidate not merged at its recorded SHA on the
-default branch (`coordination-state.md` §10.2a). The validator enforces structure only. Every automated body mutation performs the
+`process`/`status` kind with `requirements: []`, has an open or provisionally closed finding in any
+location, lacks a latest published complete APPROVED review of the exact final candidate (read for the
+current identity from every candidate PR the issue's history has recorded), whose closing patch changes
+the WP identity or a candidate, or has a candidate not merged at its recorded SHA on the default branch
+(`coordination-state.md` §10.2a). The validator enforces structure only. Every automated body mutation performs the
 §11.1.1 post-write re-fetch and full equivalence check, and the re-fetched state passes the validator.
 
 ### 12.7 Moving rules from prompts to enforcement
