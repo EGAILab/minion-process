@@ -399,6 +399,8 @@ IMPLEMENTATION_REVIEW
                                 # REVIEW); see agent-workflow.md §11.4
   -> REMEDIATION
   -> CONTRACT_CONVERGENCE
+  -> CLOSED                    # process/status WP only: clean first review APPROVED, candidate
+                                # merged (§10.2a)
 
 REMEDIATION
   -> IMPLEMENTATION_REVIEW
@@ -463,10 +465,32 @@ FINAL_CONTRACT_REVIEW
 
 It keeps these historical transitions **illegal**, with the legal route stated:
 - `CONTRACT_REVIEW -> REMEDIATION` and `REMEDIATION -> CONTRACT_REVIEW` (#49): contract findings are remediated in `CONTRACT_DRAFT`. `REMEDIATION` is for an implementation candidate.
-- `RUST_IMPLEMENTATION -> IMPLEMENTATION_REVIEW` and `IMPLEMENTATION_REVIEW -> CLOSED` (#79): Rust review is `CLOSURE_REVIEW`, which alone leads to `CLOSED`.
+- `RUST_IMPLEMENTATION -> IMPLEMENTATION_REVIEW` (#79): Rust review is `CLOSURE_REVIEW`.
+- `IMPLEMENTATION_REVIEW -> CLOSED` for any WP that owns product scope (#79): it closes through `CLOSURE_REVIEW`. The one exception is the guarded clean-first-review route of §10.2a, for `process`/`status` WPs only.
 - `BLOCKED` (#49): not a status value.
 
 Historical records keep what they recorded. The table applies to transitions made after adoption.
+
+### 10.2a Clean first review of a process or status work package (`minion-process#12`, kit 0.3.2)
+
+The §10.2 route starts from `FINAL_CONTRACT_REVIEW`, which a candidate may enter only after it changed (`WORKFLOW.md` §11.4, §12.6). A process or status WP whose first independent review approved it cleanly therefore had no legal closure: entering `FINAL_CONTRACT_REVIEW` with an unchanged candidate, inventing a remediation or requesting a redundant second review would each misrecord its history (Owner decision, `minion-agent#222` issuecomment-6209854474). The table therefore also allows:
+
+```text
+IMPLEMENTATION_REVIEW
+  -> CLOSED                    # process/status WP: clean first review APPROVED, candidate merged
+```
+
+`minion-process apply` and `close` refuse it, with zero writes, unless all of the following hold:
+- **Kind.** `kind` is explicitly `process` or `status`. Any other kind, or none, is refused; a `semantic` or `delta` WP closes through `CLOSURE_REVIEW`.
+- **No product scope.** `requirements` is an explicit `[]` in both the current and the intended state.
+- **No open findings.** `open_findings` is empty in both states, so the closing patch cannot clear a finding.
+- **Approval published.** The WP's published review events (coordination issue and candidate PRs, `CE-PROC-P3A-01`) are fully read, orderable, conflict-free and carry no invalid header, and the **latest** event is a `complete: true`, `APPROVED` review of type `IMPLEMENTATION_REVIEW` or `PROCESS_REVIEW`. The review-header validator already refuses an approval with a blocking finding or with the reviewer equal to the author. The tool reads the published header, never a hand-recorded marker.
+- **Exact final candidate.** That approval's `candidate` map equals the recorded candidates' `sha` exactly, and the closing patch does not change any candidate SHA. A later review, or a changed candidate, makes the approval stale and is refused.
+- **Merged.** Every recorded candidate is a PR that GitHub reports `MERGED`, whose head is the approved SHA and whose merge commit is the recorded `merged_sha`.
+- **On the default branch.** Each merge commit is reachable from its repository's default branch.
+- **Round trip.** The normal coordination-state commit rule (pre-write YAML round trip, post-write re-fetch and equivalence check) applies unchanged.
+
+The existing `FINAL_CONTRACT_REVIEW -> CLOSED` (§10.2) and `CLOSURE_REVIEW -> CLOSED` routes and their guards are unchanged. The route adds no state and no shortcut from `BLOCKED_FOR_OWNER`.
 
 ### 10.3 Scoping-only work packages (Owner decision, `minion-agent#157` issuecomment-6051471806)
 
@@ -798,7 +822,8 @@ workflow:
 - **Kind is fixed after intake.** A different kind is a new WP.
 - **Downgrade is Owner-only.** governing → mechanical requires `consequence.downgrade` and a recorded
   `governance_source`; the tool checks presence, the agent validates the source (§11.10).
-- **Closure by kind.** `FINAL_CONTRACT_REVIEW -> CLOSED` (§10.2) only for `process`/`status`;
-  `SCOPING -> CLOSED` (§10.3) only for `scoping`; `semantic`/`delta` close through `CLOSURE_REVIEW`.
+- **Closure by kind.** `FINAL_CONTRACT_REVIEW -> CLOSED` (§10.2) and `IMPLEMENTATION_REVIEW -> CLOSED`
+  (§10.2a) only for `process`/`status`; `SCOPING -> CLOSED` (§10.3) only for `scoping`;
+  `semantic`/`delta` close through `CLOSURE_REVIEW`.
 - Existing §10.2/§10.3 checks (explicit `[]`, no open findings, merged candidates, approved scoping
   review) are unchanged and run after this guard.

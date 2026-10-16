@@ -11,6 +11,7 @@ from typing import Any
 
 from .github import REPOS, GitHub, GitHubError, same_text
 from .model import NON_ACTIONABLE, BodyFormatError, candidates, render_body, split_body
+from .review import Copy, Selection, UnreadComment, parse_review_records, select_reviews
 from .transitions import check_transition
 from .validate import errors, validate_workflow
 
@@ -81,7 +82,8 @@ def classification_guard(old: dict[str, Any], new: dict[str, Any]) -> str | None
       `consequence.downgrade` with the Owner decision and the consenting reviewer, and a recorded
       `governance_source`. The tool checks presence; the agent validates the source (§11.10).
     - **Closure routes by kind.** `FINAL_CONTRACT_REVIEW -> CLOSED` (§10.2) is for `process`/`status`
-      kinds; `SCOPING -> CLOSED` (§10.3) is for `scoping`. A semantic or delta WP closes through
+      kinds, and so is `IMPLEMENTATION_REVIEW -> CLOSED` (§10.2a, `_first_review_closure`);
+      `SCOPING -> CLOSED` (§10.3) is for `scoping`. A semantic or delta WP closes through
       `CLOSURE_REVIEW` only.
     - **Classification is sticky** (`PROC-KIT-P2-R001`): once recorded, `kind` and `consequence` are never
       removed or nulled, so a class cannot be laundered through an unclassified state; any effective
@@ -225,6 +227,111 @@ def _scoping_closure(gh: GitHub, old: dict[str, Any], new: dict[str, Any]) -> st
     return None
 
 
+def published_reviews(gh: GitHub, repo: str, number: int, workflow: dict[str, Any]) -> Selection:
+    """The review events published on the coordination issue and on the workflow's candidate PRs
+    (`CE-PROC-P3A-01`): every comment's claims become copies carrying the remote's publication metadata;
+    `select_reviews` groups them into distinct events, mirrors, conflicts and invalid headers."""
+    comments = list(gh.issue_comments(repo, number))
+    for side, entry in candidates(workflow).items():
+        if isinstance(entry, dict) and entry.get("pr"):
+            comments += gh.issue_comments(REPOS[side], int(entry["pr"]))
+    copies: list[Copy] = []
+    unread: list[int | None] = []
+    for comment in comments:
+        try:
+            claims = parse_review_records(comment["body"])
+        except UnreadComment:  # R11: the whole comment is excluded, visibly; nothing partial is credited
+            unread.append(comment["id"])
+            continue
+        copies += [Copy(comment["created_at"], comment["id"], claim) for claim in claims]
+    return select_reviews(copies, str(workflow["work_package"]), unread)
+
+
+FIRST_REVIEW_CLOSURE_KINDS = ("process", "status")
+FIRST_REVIEW_TYPES = ("IMPLEMENTATION_REVIEW", "PROCESS_REVIEW")
+"""The published review types that can be the clean first review of a process/status WP (§10.2a)."""
+
+
+def _first_review_closure(
+    gh: GitHub, repo: str, number: int, old: dict[str, Any], new: dict[str, Any]
+) -> str | None:
+    """`IMPLEMENTATION_REVIEW -> CLOSED` is legal only for a clean process-only or status-only work package
+    whose first independent review approved the exact candidate (`coordination-state.md` §10.2a,
+    `minion-process#12`). Every clause is checked against the current and intended state and against
+    GitHub, never against a hand-recorded marker:
+
+    1. `kind` is explicitly `process` or `status`;
+    2. `requirements` is an explicit `[]` before and after;
+    3. no open finding, before or after (the closing patch cannot clear one);
+    4. the latest published review event of the WP (a complete, readable, conflict-free selection) is a
+       `complete: true`, `APPROVED` `IMPLEMENTATION_REVIEW`/`PROCESS_REVIEW` whose candidate map is
+       exactly the recorded candidates' SHAs (independence and zero blocking findings are enforced by
+       the review-header validator);
+    5. the candidate SHAs are the same before and after the closing patch;
+    6. every candidate PR is `MERGED`, its head is the approved SHA and its merge commit is the recorded
+       `merged_sha`;
+    7. each merge commit is reachable from its repository's default branch.
+
+    The coordination-state round trip (the eighth clause) is `commit_state`'s own. Semantic and delta WPs,
+    unapproved or stale approvals, unmerged candidates and open findings are refused; they keep the
+    existing routes (§10.2 `FINAL_CONTRACT_REVIEW -> CLOSED`, `CLOSURE_REVIEW -> CLOSED`)."""
+    if not (old["status"] == "IMPLEMENTATION_REVIEW" and new["status"] == "CLOSED"):
+        return None
+    route = "IMPLEMENTATION_REVIEW -> CLOSED"
+    kind = new.get("kind")
+    if kind not in FIRST_REVIEW_CLOSURE_KINDS:
+        return (
+            f"{route} is for a clean process or status WP; kind is {kind!r}. A semantic or delta WP closes "
+            "through CLOSURE_REVIEW (§10.2a, §14)"
+        )
+    if old.get("requirements") != [] or new.get("requirements") != []:
+        return f"{route} requires requirements to be an explicit [] before and after the transition (§10.2a)"
+    if old.get("open_findings") or new.get("open_findings"):
+        return "cannot close with open findings, and the closing patch cannot clear them (§4.3, §10.2a)"
+    present = {side: c for side, c in candidates(new).items() if c is not None}
+    if not present:
+        return f"{route} requires at least one recorded candidate (§4.3)"
+    for side, candidate in present.items():
+        if not (
+            isinstance(candidate, dict)
+            and candidate.get("pr")
+            and candidate.get("sha")
+            and candidate.get("merged_sha")
+        ):
+            return f"cannot close before the {side} candidate records its pr, sha and merged_sha (§4.3)"
+    final = {side: c["sha"] for side, c in present.items()}
+    before = {side: c.get("sha") for side, c in candidates(old).items() if isinstance(c, dict)}
+    if before != final:
+        return f"{route}: the closing patch changed the candidate ({before} -> {final}) (§10.2a)"
+    selection = published_reviews(gh, repo, number, new)
+    if not selection.complete or selection.conflicts or selection.invalid_total:
+        return (
+            f"{route} needs an unambiguous published review record: {len(selection.unread_comments)} unread "
+            f"comment(s), {selection.unorderable} unorderable, {len(selection.conflicts)} conflict(s), "
+            f"{selection.invalid_total} invalid header(s) (§10.2a)"
+        )
+    if not selection.events:
+        return f"{route} requires a published review of the exact candidate; none found (§10.2a)"
+    latest = selection.events[-1]
+    label = f"{route}: latest review ({latest['reviewer']}, round {latest['round']}, {latest['type']})"
+    if latest["verdict"] != "APPROVED" or latest["complete"] is not True:
+        return f"{label} is {latest['verdict']} complete={latest['complete']}, not a complete APPROVED"
+    if latest["type"] not in FIRST_REVIEW_TYPES:
+        return f"{label} is not one of {', '.join(FIRST_REVIEW_TYPES)} (§10.2a)"
+    if latest["candidate"] != final:
+        return f"{label} approved {latest['candidate']}, not the exact final candidate {final} (§10.2a)"
+    for side, candidate in present.items():
+        target, merged, number_ = REPOS[side], candidate["merged_sha"], candidate["pr"]
+        pr = gh.pr(target, number_)
+        if pr.get("state") != "MERGED" or (pr.get("mergeCommit") or {}).get("oid") != merged:
+            return f"{side} PR #{number_} is not merged at {merged[:12]} (§10.2a)"
+        if pr.get("headRefOid") != candidate["sha"]:
+            return f"{side} PR #{number_} merged head is not the approved {candidate['sha'][:12]} (§11.3)"
+        if not gh.contains(target, gh.default_branch(target), merged):
+            return f"{side} merge {merged[:12]} is not on the default branch (§10.2a)"
+    return None
+
+
 def commit_state(
     gh: GitHub,
     repo: str,
@@ -269,6 +376,7 @@ def commit_state(
         or classification_guard(old, new_workflow)
         or _process_closure(old, new_workflow)
         or _scoping_closure(gh, old, new_workflow)
+        or _first_review_closure(gh, repo, number, old, new_workflow)
     )
     if reason:
         raise CheckFailed(reason)

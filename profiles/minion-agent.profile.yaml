@@ -1,7 +1,7 @@
 # Minion-Agent profile (first consumer): the kit's reference copy, validated in the kit's CI.
 # Intended live location on future adoption: minion-agent-docs/process/profile.yaml (no such file exists
 # until Minion-Agent's own reviewed adoption PR; this file does not imply present adoption).
-kit: {version: "0.3.0", source: EGAILab/minion-process}
+kit: {version: "0.3.2", source: EGAILab/minion-process}
 project: minion-agent
 
 authority:                                # agent-workflow.md section 3: adopted Pi source -> parity manifest -> spec -> conformance
