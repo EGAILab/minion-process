@@ -2,7 +2,7 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
-## 0.4.0 - project scope by default (unreleased)
+## 0.4.0 - project scope by default; onboarding tools (unreleased)
 
 Normative kit change, ordered by the Owner on 2026-10-16 (`EGAILab/minion-agent#231`).
 
@@ -14,6 +14,15 @@ Normative kit change, ordered by the Owner on 2026-10-16 (`EGAILab/minion-agent#
   adoption checklist.
 - `WORKFLOW.md` §9.8: one paragraph and the link.
 - `lessons/PROJECT-SCOPE-2026-10-16.md`: the Owner's words and the audit that led to the rule.
+- Onboarding, ordered by the Owner on 2026-10-16 (`onboarding.md`):
+  - `minion_process/releases/<version>.yaml` release manifests, one per release from 0.4.0;
+  - `minion-process onboard --root R --from A --to B [--markdown]`, a read-only checklist of every
+    release's adoption steps between two versions;
+  - `minion-process launch-plan` and `session-record`, the session (re)launch plan from
+    `<root>/.minion/sessions.yaml`;
+  - `bootstrap/install.ps1`, which installs a release inside the project;
+  - `relaunch.ps1`, shipped in the package, which relaunches a session with the PS-3 environment and
+    the PS-5 Codex line and records its session id for the next relaunch.
 
 ## 0.3.1 - lesson: shared build caches and mtime freshness (unreleased)
 

@@ -38,7 +38,8 @@ Notes:
 - `autoMemoryDirectory` takes an absolute path; Claude Code shows a trust warning at launch when a project
   sets it. The warning is expected.
 - A project's **control files** are Owner-controlled: `<root>/.claude/settings*.json`,
-  `<root>/.claude/hooks/`, `<root>/.codex/` and `<root>/.agents/`. They hold the hooks, the
+  `<root>/.claude/hooks/`, `<root>/.codex/`, `<root>/.agents/` and `<root>/.minion/` (the kit install
+  record, `relaunch.ps1` and the session list, `onboarding.md`). They hold the hooks, the
   sandbox-related settings and the memory location. The memory notes in `<root>/.claude/memory/` are not
   control files and stay writable.
 - An agent never edits an installed control file. A proposed change is committed for review in the

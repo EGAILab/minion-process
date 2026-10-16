@@ -1,0 +1,60 @@
+version: 0.4.0
+summary: >-
+  Project scope by default (project-scope.md PS-1..PS-7) and the onboarding tools: release manifests,
+  `onboard`, the session launch plan and bootstrap/relaunch.ps1.
+steps:
+  - id: KIT-INSTALL
+    title: the kit is installed inside the project (bootstrap/install.ps1), not in a user-level prefix
+    actor: owner
+    applies: all
+    check: {kind: exists, path: .minion/kit.json}
+  - id: SESSIONS
+    title: the project's sessions are listed in .minion/sessions.yaml (Owner-controlled)
+    actor: owner
+    applies: all
+    check: {kind: exists, path: .minion/sessions.yaml}
+  - id: TEMP
+    title: temp, caches and build outputs live under .tmp/ (PS-3)
+    actor: agent
+    applies: all
+    check: {kind: exists, path: .tmp}
+  - id: MEMORY-DIR
+    title: Claude auto-memory is set to <root>/.claude/memory (PS-2)
+    actor: owner
+    applies: claude
+    check: {kind: json_equals, path: .claude/settings.json, key: autoMemoryDirectory, value: "{root}/.claude/memory"}
+  - id: MEMORY-MIGRATED
+    title: existing user-level memory files copied into .claude/memory and listed on the coordination issue
+    actor: agent
+    applies: claude
+    check: {kind: manual}
+  - id: GUARD
+    title: the project PreToolUse guard is installed and registered (PS-7)
+    actor: owner
+    applies: claude
+    check: {kind: contains, path: .claude/settings.json, text: PreToolUse}
+  - id: CODEX-RELAUNCH
+    title: Codex relaunched through relaunch.ps1, effective policy checked (sandbox, writable roots, layers) (PS-5)
+    actor: owner
+    applies: codex
+    check: {kind: manual}
+  - id: CODEX-RULES
+    title: project-specific Codex approvals live in .codex/rules, none in the user-level rules (PS-1)
+    actor: owner
+    applies: codex
+    check: {kind: manual}
+  - id: CONTROL-DENY
+    title: Codex is denied writes to Claude's control files by an Owner OS deny-write, or the gap is recorded (PS-7)
+    actor: owner
+    applies: codex
+    check: {kind: manual}
+  - id: WITNESSES
+    title: both agents' witness rows run and recorded (PS-7)
+    actor: agent
+    applies: all
+    check: {kind: manual}
+  - id: PROFILE-PIN
+    title: the profile's kit.version is raised to 0.4.0 through the project's own review
+    actor: agent
+    applies: all
+    check: {kind: manual}

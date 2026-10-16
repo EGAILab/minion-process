@@ -20,6 +20,8 @@ consequence-classes.md              kinds, consequence predicates, who classifie
 routing.md                          delegated routes RT-1..RT-6 (in force per profile delegation.routing)
 gate-tiers.md                       G0–G3 and the minimum tier per stage
 project-scope.md                    project scope by default: where agent settings, memory and temp live (PS-1..PS-7)
+onboarding.md                       moving a project to a kit release: install, onboard checklist, relaunch
+bootstrap/install.ps1               installs a kit release inside a project (Owner-run)
 finding-taxonomy.md                 generic finding classes; a profile supplies aliases
 authority-dependencies.md           pinned external authority dependencies (verify + execute, never trust)
 requirement-id-convention.md        stable requirement IDs as traceability keys
@@ -53,6 +55,8 @@ python -m minion_process --repo OWNER/REPO handoff-check <issue>
 python -m minion_process --repo OWNER/REPO apply <issue> patch.py [--dry-run]
 python -m minion_process merge code <pr> <approved-sha>
 python -m minion_process comment docs <pr> review.md --pr
+python -m minion_process onboard --root <project> --from 0.3.1 --to 0.4.0 [--markdown]
+python -m minion_process launch-plan --root <project> <session> [--resume <id> | --fresh]
 ```
 
 Requirements: Python ≥ 3.12, `pyyaml`, and an authenticated `gh` CLI for the GitHub commands.
