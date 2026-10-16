@@ -103,7 +103,7 @@ foreach ($name in 'PYTHONPATH', 'PYTHONHOME', 'PYTHONUSERBASE', 'PYTHONSTARTUP',
 }
 $env:PYTHONNOUSERSITE = '1'
 $env:PIP_CONFIG_FILE = 'nul'
-$env:TEMP = $runTemp; $env:TMP = $runTemp
+$env:TEMP = $runTemp; $env:TMP = $runTemp; $env:TMPDIR = $runTemp  # every temp selector (Python reads TMPDIR first)
 
 if (-not (Test-Path -LiteralPath $venv)) {
     New-Item -ItemType Directory -Force -Path $venv | Out-Null

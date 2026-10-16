@@ -122,11 +122,15 @@ def python_with_kit(tmp_path: Path) -> Path:
     return py
 
 
-def root_pane(sid: str | None, tool: str = "codex", status: str = "done") -> dict[str, Any]:
+def root_pane(
+    sid: str | None, tool: str = "codex", status: str = "done", agent: bool | None = None
+) -> dict[str, Any]:
     """A `herdr pane get w7:p1` result in the project root (`<ROOT>` is filled in by `relaunch`)."""
     body: dict[str, Any] = {"pane_id": "w7:p1", "agent_status": status, "cwd": "<ROOT>"}
+    if agent or (agent is None and sid is not None):
+        body["agent"] = tool
     if sid is not None:
-        body.update(agent=tool, agent_session={"value": sid})
+        body["agent_session"] = {"value": sid}
     return {"exit": 0, "out": json.dumps({"result": {"pane": body, "type": "pane_info"}})}
 
 
@@ -184,7 +188,7 @@ def recorded(project: Path) -> dict[str, Any]:
 def test_r002_unreadable_baseline_records_nothing(tmp_path: Path) -> None:
     project, result = relaunch(tmp_path, [FAIL, root_pane(STALE)], "-Fresh")
     assert result.returncode == 0, result.stderr
-    assert "could not be read" in result.stderr + result.stdout
+    assert "no usable herdr baseline" in result.stderr + result.stdout
     assert recorded(project) == {"session": OWNER, "source": "owner"}
 
 
@@ -206,3 +210,23 @@ def test_r002_new_session_of_this_launch_is_recorded(tmp_path: Path) -> None:
     project, result = relaunch(tmp_path, [root_pane(None), root_pane(NEW, status="working")], "-Fresh")
     assert result.returncode == 0, result.stderr
     assert recorded(project) == {"session": NEW, "source": "herdr", "pane": "w7:p1", "tool": "codex"}
+
+
+def test_r002_agent_without_a_detected_id_is_not_an_empty_pane(tmp_path: Path) -> None:
+    project, result = relaunch(tmp_path, [root_pane(None, agent=True), root_pane(STALE)], "-Fresh")
+    assert result.returncode == 0, result.stderr
+    assert "no usable herdr baseline" in result.stderr + result.stdout
+    assert recorded(project) == {"session": OWNER, "source": "owner"}
+
+
+def test_r001_inherited_tmpdir_does_not_redirect_child_temp(tmp_path: Path) -> None:
+    project, sibling = two_folders(tmp_path)
+    fake_pip_venv(project)
+    env = {**fake_env(project), "TMPDIR": str(sibling), "TEMP": str(sibling), "TMP": str(sibling)}
+    result = install("-Root", str(project), "-Version", "0.4.0", "-From", "minion-process", env=env)
+    assert result.returncode == 0, result.stderr
+    assert list(sibling.iterdir()) == []
+    seen = json.loads((project / "fake-pip.json").read_text(encoding="utf-8"))
+    run_temp = Path(seen["env"]["TEMP"])
+    assert seen["env"]["TMPDIR"] == str(run_temp) and run_temp.parent.name.startswith("run-")
+    assert [p.read_bytes() for p in run_temp.iterdir()] == [b"probe"]  # the default-temp write landed here

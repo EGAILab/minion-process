@@ -156,8 +156,12 @@ def test_r001_junction_below_the_root_is_refused_before_any_write(tmp_path: Path
 
 FAKE_PIP = """
 import json, os, pathlib, sys, sysconfig
-pathlib.Path(os.environ["FAKE_PIP_LOG"]).write_text(json.dumps({"argv": sys.argv[1:], "env": {
-    k: v for k, v in os.environ.items() if k.startswith(("PIP_", "PYTHON", "TEMP"))}}), encoding="utf-8")
+seen = {k: v for k, v in os.environ.items() if k.startswith(("PIP_", "PYTHON", "TEMP", "TMP"))}
+log = {"argv": sys.argv[1:], "env": seen}
+pathlib.Path(os.environ["FAKE_PIP_LOG"]).write_text(json.dumps(log), encoding="utf-8")
+import tempfile
+with tempfile.NamedTemporaryFile(delete=False) as handle:
+    handle.write(b"probe")
 cache = pathlib.Path(sys.argv[sys.argv.index("--cache-dir") + 1])
 (cache / "wheels").mkdir(parents=True, exist_ok=True)
 (cache / "wheels" / "probe.txt").write_text("probe", encoding="utf-8")

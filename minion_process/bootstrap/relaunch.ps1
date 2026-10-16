@@ -57,25 +57,30 @@ if ($Resume) {
 # launch (a stale one) or the one already recorded by this launch.
 $job = $null
 $pane = $env:HERDR_PANE_ID
-# The pre-launch read must succeed: a confirmed empty pane or a pane showing an id (excluded as stale).
-# If herdr cannot be read, nothing is recorded for this launch and the recorded target is kept.
+# The pre-launch read must give positive evidence: either no agent in the pane (confirmed empty) or an
+# agent with a readable id (excluded as stale). An unreadable pane, or an agent whose id herdr has not
+# detected, gives none: nothing is recorded for this launch and the recorded target is kept.
 $baseline = $null
 if ($pane) {
     try {
         $seen = (herdr pane get $pane) -join "`n" | ConvertFrom-Json
-        if ($LASTEXITCODE -eq 0 -and $seen.result.pane.pane_id -eq $pane) {
-            $baseline = @()
-            $sid = $seen.result.pane.agent_session.value
-            if ($sid) { $baseline += [string]$sid }
+        $p = $seen.result.pane
+        if ($LASTEXITCODE -eq 0 -and $p.pane_id -eq $pane) {
+            if (-not $p.agent) { $baseline = @() }  # confirmed: no agent in the pane
+            elseif ([string]$p.agent_session.value -cmatch '\A[0-9A-Za-z][0-9A-Za-z-]{7,63}\z') {
+                $baseline = @([string]$p.agent_session.value)
+            }
         }
     }
     catch { $baseline = $null }
-    if ($null -eq $baseline) { Write-Warning "herdr could not be read for pane $pane; this launch's session id is not recorded" }
+    if ($null -eq $baseline) {
+        Write-Warning "no usable herdr baseline for pane $pane (unreadable, or an agent without a detected id); this launch's session id is not recorded"
+    }
 }
 if ($null -ne $baseline) {
     if ($Fresh -and $plan.previous) { $baseline += [string]$plan.previous }  # a new session never has the old id
     $poll = 5
-    if ($env:MINION_RELAUNCH_POLL_SECONDS -match '^[1-9][0-9]?$') { $poll = [int]$env:MINION_RELAUNCH_POLL_SECONDS }
+    if ($env:MINION_RELAUNCH_POLL_SECONDS -cmatch '\A[1-9][0-9]?\z') { $poll = [int]$env:MINION_RELAUNCH_POLL_SECONDS }
     $excluded = ($baseline | Where-Object { $_ }) -join ','  # session ids hold no ','
     $job = Start-Job -ArgumentList $py, $root, $Session, $pane, $excluded, $poll -ScriptBlock {
         param($py, $root, $name, $pane, $excluded, $poll)

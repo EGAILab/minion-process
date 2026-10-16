@@ -81,8 +81,10 @@ The project's own rules still decide when it adopts. The kit never approves its 
      - its working folder is the project root;
      - its id is not the one the pane showed before the launch, not one already recorded, and for a
        `-Fresh` launch not the id recorded before it.
-     Anything else is ignored, so a stale or foreign id never replaces a usable recorded one. If herdr
-     cannot be read before the launch, nothing is recorded for that launch and a warning says so.
+     Anything else is ignored, so a stale or foreign id never replaces a usable recorded one. Recording
+     needs positive evidence before the launch: either the pane has no agent, or its agent shows a
+     readable id, which is then excluded. If herdr cannot be read, or an agent is present without a
+     detected id, nothing is recorded for that launch and a warning says so.
    - Without a recorded id, the plan is refused rather than starting a new session by accident. Pass
      `-Resume <id>` once, or `-Fresh` for a new session.
    - After a relaunch, the PS-5 effective-policy check still applies.
