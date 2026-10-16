@@ -296,23 +296,40 @@ def _same_candidates(old: dict[str, Any], new: dict[str, Any]) -> bool:
     return True
 
 
+STATE_MARKERS = ("```yaml", "```yml", "~~~yaml", "~~~yml", "workflow:")
+
+
+def _stateless(body: str) -> bool:
+    """True only when a revision positively carries no state block: no YAML fence opener and no
+    `workflow:` key anywhere, compared case-insensitively. Anything else must parse (KIT-032-R001)."""
+    folded = body.casefold()
+    return not any(marker in folded for marker in STATE_MARKERS)
+
+
 def _approval_sources(
     gh: GitHub, repo: str, number: int, current: dict[str, Any]
 ) -> tuple[set[tuple[str, int]], str | None]:
     """Every candidate PR this coordination issue has ever recorded, from GitHub's own edit history of the
     issue body plus the current state, so a candidate re-pointed in an earlier ordinary patch cannot hide
-    a review published on its earlier PR. Refuses (second value) when the history cannot be read or when
-    the work-package identity ever differed from the current one (KIT-032-R001)."""
+    a review published on its earlier PR. History fails closed (KIT-032-R001, review 2): a revision is
+    skipped only when it positively carries no state block (`_stateless`). Refuses (second value) when the
+    history cannot be fetched, a revision's body is unreadable (`None`), a state-bearing revision does not
+    parse or records an unreadable candidate, or the work-package identity ever differed from the current
+    one."""
     prs = _candidate_prs(current)
     try:
         revisions = gh.issue_revisions(repo, number)
     except GitHubError as error:
         return prs, f"cannot read the issue's edit history to bind the approval source: {error}"
-    for _, body in revisions:
+    for revision_id, body in revisions:
+        if body is None:
+            return prs, f"revision {revision_id} of the issue body is unreadable; refused (§10.2a)"
+        if _stateless(body):
+            continue  # positively no state block: it records no candidate and no identity
         try:
             state = split_body(body).workflow
-        except BodyFormatError:
-            continue  # a revision without a state block records no candidate and no identity
+        except BodyFormatError as error:
+            return prs, f"revision {revision_id} carries a state block that does not parse ({error}) (§10.2a)"
         if state.get("work_package") != current["work_package"]:
             return prs, (
                 f"the issue recorded work package {state.get('work_package')!r} before "
@@ -527,6 +544,8 @@ def restore_revision(gh: GitHub, repo: str, number: int, revision_id: str, dry_r
     if not matches:
         raise CheckFailed(f"revision {revision_id!r} is not in issue #{number}'s edit history")
     baseline = matches[0]
+    if baseline is None:
+        raise CheckFailed(f"revision {revision_id} has no readable body in GitHub's edit history")
     try:
         baseline_state = split_body(baseline)
         baseline_errors = errors(validate_workflow(baseline_state.workflow))

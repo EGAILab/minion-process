@@ -370,6 +370,54 @@ def test_r001_an_unreadable_history_or_historical_candidate_refuses() -> None:
     assert fake.edits == 0
 
 
+def _repointed() -> FakeGitHub:
+    """Review 2's fixture: the current candidate is merged PR #313 at the approved SHA; earlier PR #312
+    carries a later rejection for this WP."""
+    fake = _fake(_wp(docs={"pr": 313, "sha": SHA_B, "base": "master", "merged_sha": MERGED}))
+    fake.prs[(DOCS, 313)] = _merged_pr(SHA_B, MERGED)
+    fake.issue_comments[(DOCS, 312)] = [_comment(_header(verdict="CHANGES_REQUESTED", round=2), 9, LATER)]
+    return fake
+
+
+@pytest.mark.parametrize(
+    ("history", "message"),
+    [
+        ([("r1", _revision(_wp()))], "not a complete APPROVED"),  # control: readable history names #312
+        ([("r1", _revision(_wp()).replace("\n```", "\n"))], "does not parse"),  # fence never closed
+        ([("r1", None)], "unreadable"),  # GitHub returned no body for this edit
+        ([("r1", "  " + _revision(_wp()))], "does not parse"),  # a state block not at the start
+        ([("r1", "notes\nworkflow: {work_package: WP-X}\n")], "does not parse"),  # a bare state key
+    ],
+    ids=["readable-history", "unterminated-state", "null-body", "indented-state", "bare-workflow-key"],
+)
+def test_r001_unreadable_history_refuses_instead_of_hiding_a_source(
+    history: list[tuple[str, str | None]], message: str
+) -> None:
+    fake = _repointed()
+    fake.revisions[(CODE, 10)] = history
+    with pytest.raises(CheckFailed, match=message):
+        _close(fake)
+    assert fake.edits == 0
+
+
+def test_r001_null_history_bodies_survive_the_real_adapter() -> None:
+    """The real `GitHub.issue_revisions` keeps a node whose `diff` is null as `None` (it used to drop it),
+    and the closure refuses on it."""
+    fake = _repointed()
+    fake.revisions[(CODE, 10)] = [("unreadable-old", None)]
+    assert GitHub(fake.run).issue_revisions(CODE, 10) == [("unreadable-old", None)]
+    with pytest.raises(CheckFailed, match="unreadable"):
+        _close(fake)
+    assert fake.edits == 0
+
+
+def test_r001_without_any_history_of_312_the_repointed_wp_closes() -> None:
+    """The paired green control for the two tests above."""
+    fake = _repointed()
+    _close(fake)
+    assert fake.edits == 1
+
+
 def test_r001_a_history_with_the_same_identity_and_prose_only_revisions_still_closes() -> None:
     fake = _fake(_wp())
     fake.revisions[(CODE, 10)] = [("r2", _revision(_wp())), ("r1", "prose before the state block\n")]

@@ -29,6 +29,10 @@ into 0.4.1.
 - `tests/test_first_review_closure.py`: a refusal witness with zero writes for every guard clause, and
   the review-1 regressions (KIT-032-R001 approval-source binding through the closing patch and the edit
   history, R002 findings in every admitted location), each with its unchanged-context control.
+- The edit-history read fails closed (review 2): `GitHub.issue_revisions` keeps an edit whose body
+  GitHub does not return as `None` instead of dropping it (and `apply --repair` refuses such a
+  revision); the closure route refuses a null body or a state-bearing revision that does not parse, and
+  skips only a revision that positively has no state block.
 - Release: package and shipped profile versions raised to 0.3.2.
 
 ## 0.3.1 - lesson: shared build caches and mtime freshness (unreleased)
