@@ -116,6 +116,8 @@ records why PS-1 to PS-5 are not enough.
 - **Witnesses at adoption, for each agent:**
   - a refused write outside the root;
   - a refused write to each control file the agent must not change, or the recorded gap;
+  - for Codex, a refused rename or replacement of the `.claude` folder itself, because denials on the
+    files inside it do not protect the folder's name;
   - an allowed write to `<root>/.claude/memory/` and `<root>/.tmp/`.
 - On native Windows a shell command can reach paths a hook parser does not see. The guarantee there is
   the rule plus the hook; the gap is recorded in the project's opt-in.

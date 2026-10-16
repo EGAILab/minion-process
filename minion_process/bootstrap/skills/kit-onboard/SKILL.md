@@ -42,12 +42,25 @@ as `PY -I -m minion_process ...`.
    - list the copied files on the issue;
    - leave the user-level copies for the Owner to remove.
 5. **Owner steps.** For every `TODO` or `MANUAL` step whose actor is `owner`, post the exact commands
-   from the section below, with this project's paths and session ids filled in. Post them in this order:
-   install, sessions file and settings, guard and permissions, relaunch.
+   from the section below, with this project's paths and session ids filled in. Use this mapping from
+   manifest step to Owner step; a step not listed here is reported to the Owner as having no runbook,
+   never improvised:
+
+   | Manifest step | Owner step |
+   |---|---|
+   | `KIT-INSTALL`, `SKILL-CLAUDE`, `SKILL-CODEX` | A |
+   | `SESSIONS`, `MEMORY-DIR`, `GUARD` | B |
+   | `CONTROL-DENY` | C |
+   | `CODEX-RELAUNCH` | D (then your effective-policy record, step 6) |
+   | `CODEX-RULES` | E |
+
+   Post them in this order: A, B, E, C, D.
 6. **Witnesses**, after the Owner reports the guard, permissions and relaunch done. Run your own rows of
    `project-scope.md` PS-7 and record each command with its result:
    - a write outside the root is refused or asked;
    - a write to each control file you must not change is refused (or the recorded gap);
+   - Codex only: renaming or replacing the `.claude` folder is refused (for example
+     `Rename-Item .claude .claude-moved`);
    - writes to `<root>/.claude/memory/` (Claude) and `<root>/.tmp/` succeed.
    For Codex, also record the effective policy you run under: sandbox mode and writable roots.
 7. **Pin.** Propose raising the profile's `kit.version` to the installed version through the project's
@@ -62,9 +75,14 @@ A. Install the release, from a kit checkout:
 B. Install the reviewed sessions file and settings: copy them from the project repository at the
    reviewed commit into `.minion\sessions.yaml` and `.claude\settings.json`. The settings include
    `"autoMemoryDirectory": "<root>/.claude/memory"` and the `PreToolUse` guard.
-C. Codex sessions only, to keep Codex off Claude's control files. Create `.claude\memory` first, then:
+C. Codex sessions only, to keep Codex off Claude's control files. Create `.claude\memory` first, then run
+   the commands below. The first two protect the `.claude` folder itself: it cannot be renamed, deleted
+   or replaced. The first does this through its own DELETE right; the second removes the project root's
+   delete-child path for the sandbox. Ordinary files in the root keep their own delete rights.
+   The rest protect the control files inside it.
    ```powershell
-   icacls "<root>\.claude" /deny "CodexSandboxUsers:(WD,AD,DC)"
+   icacls "<root>\.claude" /deny "CodexSandboxUsers:(D,WD,AD,DC)"
+   icacls "<root>" /deny "CodexSandboxUsers:(DC)"
    icacls "<root>\.claude\settings.json" /deny "CodexSandboxUsers:(W,D,WDAC,WO)"
    icacls "<root>\.claude\hooks" /deny "CodexSandboxUsers:(OI)(CI)(W,D,DC,WDAC,WO)"
    icacls "<root>\.claude\skills" /deny "CodexSandboxUsers:(OI)(CI)(W,D,DC,WDAC,WO)"
@@ -73,3 +91,20 @@ C. Codex sessions only, to keep Codex off Claude's control files. Create `.claud
 D. Relaunch each session in its own pane after the agent has exited. Check first with `-DryRun`, then run:
    `& <root>\.minion\relaunch.ps1 <session> -Resume <current session id>`
    The id is in herdr `pane get` (`agent_session.value`). Later relaunches need no id.
+E. Codex sessions only: project-specific approvals live in the project, not in the user-level rules
+   (`CODEX-RULES`). You prepare it:
+   1. Read `~/.codex/rules/default.rules`. Reading is allowed; never write it.
+   2. List the rules that name this project: its paths, repositories, branches or commands.
+   3. If there are none, post that evidence (the file's sha256 and the lines you checked) and mark the
+      step done.
+   4. Otherwise, commit those exact lines for review under `process/enforcement/codex-rules.rules`.
+      Then post the Owner commands:
+      ```powershell
+      New-Item -ItemType Directory -Force "<root>\.codex\rules" | Out-Null
+      Copy-Item "$HOME\.codex\rules\default.rules" "<root>\.tmp\default.rules.before-<date>"
+      Copy-Item "<reviewed process\enforcement\codex-rules.rules>" "<root>\.codex\rules\default.rules"
+      ```
+      and ask the Owner to remove exactly the listed lines from the user-level file, and nothing else.
+      Rules for other projects or of general use stay.
+   5. After the next Codex launch, `codex execpolicy check -r <root>\.codex\rules\default.rules <one
+      listed command>` must match. Record that.
