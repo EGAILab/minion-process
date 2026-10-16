@@ -17,7 +17,7 @@ packages = ["minion_process", "minion_process.releases", "minion_process.bootstr
 
 [tool.setuptools.package-data]
 "minion_process.releases" = ["*.yaml"]
-"minion_process.bootstrap" = ["*.ps1", "skills/*/SKILL.md"]
+"minion_process.bootstrap" = ["*.ps1", "skills/*/SKILL.md", "rules/*.rules"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -5,7 +5,8 @@ Install a pinned Minion-Process kit release inside a project (project-scope.md P
 .DESCRIPTION
 Creates <root>\.tmp\kit\<version>\venv, installs the kit release into it, copies the shipped
 relaunch.ps1 to <root>\.minion\ and the kit-onboard skill to <root>\.claude\skills\ and
-<root>\.agents\skills\, and writes <root>\.minion\kit.json (version and interpreter).
+<root>\.agents\skills\, the Codex rules sentinel to <root>\.codex\rules\kit-sentinel.rules, and writes
+<root>\.minion\kit.json (version and interpreter).
 
 Nothing is written outside the root:
 - no path component below the root may be a junction or link;
@@ -136,6 +137,12 @@ foreach ($base in '.claude\skills\kit-onboard', '.agents\skills\kit-onboard') {
     Assert-Inside $folder | Out-Null
     Set-NewFile (Join-Path $folder 'SKILL.md') { param($t) Copy-Item -LiteralPath $skill -Destination $t }
 }
+# The Codex rules-loading sentinel (skill step E5). Kit-owned: it never replaces another rules file.
+$sentinel = (& $py -I -c "from importlib import resources; print(resources.files('minion_process.bootstrap') / 'rules' / 'kit-sentinel.rules')").Trim()
+$rules = Assert-Inside (Join-Path $rootFull '.codex\rules')
+New-Item -ItemType Directory -Force -Path $rules | Out-Null
+Assert-Inside $rules | Out-Null
+Set-NewFile (Join-Path $rules 'kit-sentinel.rules') { param($t) Copy-Item -LiteralPath $sentinel -Destination $t }
 $kitJson = (@{ version = $Version; python = $py } | ConvertTo-Json) + "`n"
 Set-NewFile (Join-Path $minion 'kit.json') { param($t) [IO.File]::WriteAllText($t, $kitJson) }
 

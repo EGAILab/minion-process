@@ -173,6 +173,9 @@ site = pathlib.Path(sysconfig.get_paths()["purelib"])
 skill = site / "minion_process" / "bootstrap" / "skills" / "kit-onboard"
 skill.mkdir(parents=True, exist_ok=True)
 (skill / "SKILL.md").write_text("# skill", encoding="utf-8")
+rules = site / "minion_process" / "bootstrap" / "rules"
+rules.mkdir(parents=True, exist_ok=True)
+(rules / "kit-sentinel.rules").write_text("# sentinel", encoding="utf-8")
 meta = site / "minion_process-0.4.0.dist-info"
 meta.mkdir(exist_ok=True)
 metadata = "Metadata-Version: 2.1\\nName: minion-process\\nVersion: 0.4.0\\n"
@@ -200,6 +203,8 @@ def test_r004_inherited_pip_destination_and_config_do_not_reach_pip(tmp_path: Pa
     project.mkdir()
     sibling.mkdir()
     fake_pip_venv(project)
+    (project / ".codex" / "rules").mkdir(parents=True)
+    (project / ".codex" / "rules" / "default.rules").write_text("# project", encoding="utf-8")
     log = project / ".tmp" / "fake-pip.json"
     env = {
         **os.environ,
@@ -222,6 +227,9 @@ def test_r004_inherited_pip_destination_and_config_do_not_reach_pip(tmp_path: Pa
         assert (project / base / "skills" / "kit-onboard" / "SKILL.md").read_text(
             encoding="utf-8"
         ) == "# skill"
+    # The rules sentinel is its own file; the project's existing rules are left as they were.
+    assert (project / ".codex" / "rules" / "kit-sentinel.rules").read_text(encoding="utf-8") == "# sentinel"
+    assert (project / ".codex" / "rules" / "default.rules").read_text(encoding="utf-8") == "# project"
 
 
 @windows

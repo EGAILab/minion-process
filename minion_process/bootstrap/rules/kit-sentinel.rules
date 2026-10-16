@@ -1,0 +1,8 @@
+# Minion-Process kit sentinel (kit-onboard skill step E5). Shipped by bootstrap/install.ps1 to
+# <root>/.codex/rules/. `minion-rules-sentinel` is not a real program: a normal Codex session that loads
+# this project's rules folder refuses it by this rule instead of reporting an unknown command.
+prefix_rule(
+    pattern=["minion-rules-sentinel"],
+    decision="forbidden",
+    justification="kit-sentinel: project rules are loaded",
+)

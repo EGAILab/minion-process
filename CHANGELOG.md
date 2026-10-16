@@ -26,6 +26,10 @@ Normative kit change, ordered by the Owner on 2026-10-16 (`EGAILab/minion-agent#
   - the `kit-onboard` agent skill, installed by `install.ps1` into `.claude/skills/` and
     `.agents/skills/`: it runs the checklist, does the agent-side steps, prepares every Owner step as
     exact commands and records the result on the coordination issue.
+  - `.codex/rules/kit-sentinel.rules`, installed by `install.ps1` as its own file: it forbids the fake
+    command `minion-rules-sentinel`, so a refusal in the project's normal Codex session proves that
+    session loads the project's rules (`CODEX-RULES`). Migrated rules go into a new
+    `migrated-<date>.rules`, and no existing rules file is overwritten.
 - `project-scope.md` PS-2: `.claude/skills/` is a control file too, since a skill changes how an agent works.
 - Release: package and shipped profile versions raised to 0.4.0.
 

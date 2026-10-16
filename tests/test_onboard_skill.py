@@ -63,3 +63,29 @@ def test_container_is_protected_as_well_as_its_children() -> None:
     assert 'icacls "<root>\\.claude" /deny "CodexSandboxUsers:(D,WD,AD,DC)"' in text
     assert 'icacls "<root>" /deny "CodexSandboxUsers:(DC)"' in text
     assert "Rename-Item .claude" in text
+
+
+def test_rules_sentinel_is_shipped_installed_and_used() -> None:
+    """The loading proof for CODEX-RULES (KIT-RELEASE-R002, round 2): a kit-owned sentinel file that
+    forbids one fake command, installed as its own file beside any project rules, never over them."""
+    shipped = resources.files("minion_process.bootstrap") / "rules" / "kit-sentinel.rules"
+    sentinel = shipped.read_text("utf-8")
+    rules = [line for line in sentinel.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    body = "\n".join(rules)
+    assert body.count("prefix_rule(") == 1
+    assert 'pattern=["minion-rules-sentinel"]' in body and 'decision="forbidden"' in body
+    assert '"rules/*.rules"' in (KIT / "pyproject.toml").read_text(encoding="utf-8")
+    installer = (KIT / "bootstrap" / "install.ps1").read_text(encoding="utf-8")
+    assert "Set-NewFile (Join-Path $rules 'kit-sentinel.rules')" in installer
+    assert "default.rules" not in installer
+    text = skill_text()
+    assert "`minion-rules-sentinel`" in text and "kit-sentinel.rules" in text
+
+
+def test_codex_rules_runbook_reads_every_file_and_never_overwrites() -> None:
+    """Step E reads all user-level rules files and installs migrated lines as a new file only."""
+    text = skill_text()
+    step = text.split("\nE. ")[1]
+    assert "`~/.codex/rules/*.rules`" in step
+    assert "migrated-<date>.rules" in step and "if (Test-Path -LiteralPath $new) { throw" in step
+    assert '\\.codex\\rules\\default.rules"' not in step
