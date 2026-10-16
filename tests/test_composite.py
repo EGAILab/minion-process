@@ -61,7 +61,7 @@ def test_handoff_refuses_with_zero_writes_when_the_candidate_would_block(fake: F
     with pytest.raises(CheckFailed, match="non-empty next_action"):
         handoff(gh, CODE, 10, "Codex", "  ")
     with pytest.raises(CheckFailed, match="illegal transition"):
-        handoff(gh, CODE, 10, "Codex", "review", "CLOSED")
+        handoff(gh, CODE, 10, "Codex", "review", "PYTHON_IMPLEMENTATION")  # table-illegal from review
     assert fake.edits == 0
 
 

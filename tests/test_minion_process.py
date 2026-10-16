@@ -272,7 +272,6 @@ def test_legal_sequences(sequence: list[str]) -> None:
         ("CONTRACT_REVIEW", "REMEDIATION"),  # #49: contract findings go back to CONTRACT_DRAFT
         ("REMEDIATION", "CONTRACT_REVIEW"),  # #49
         ("RUST_IMPLEMENTATION", "IMPLEMENTATION_REVIEW"),  # #79: Rust review is CLOSURE_REVIEW
-        ("IMPLEMENTATION_REVIEW", "CLOSED"),  # #79
         ("CONTRACT_CONVERGENCE", "RUST_IMPLEMENTATION"),  # skipping the final complete review
         ("PYTHON_IMPLEMENTATION", "RUST_IMPLEMENTATION"),  # Rust before shared/Python approval
         ("INVALID_UNAUTHORIZED", "SCOPING"),
@@ -316,11 +315,11 @@ def test_commit_rejects_keys_outside_allowed_before_writing(fake: FakeGitHub) ->
 
 
 def test_commit_rejects_an_illegal_transition_before_writing(fake: FakeGitHub) -> None:
-    def to_closed(w: dict[str, Any]) -> None:
-        w["status"] = "CLOSED"
+    def to_python(w: dict[str, Any]) -> None:  # -> CLOSED is now a guarded route (§10.2a)
+        w["status"] = "PYTHON_IMPLEMENTATION"
 
     with pytest.raises(CheckFailed, match="illegal transition"):
-        commit_state(GitHub(fake.run), CODE, 10, to_closed, {"status"})
+        commit_state(GitHub(fake.run), CODE, 10, to_python, {"status"})
     assert fake.edits == 0
 
 

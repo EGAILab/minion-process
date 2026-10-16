@@ -38,18 +38,17 @@ from .ops import (
     commit_state,
     guarded_merge,
     handoff_report,
+    published_reviews,
     restore_revision,
     verified_comment,
 )
 from .profile import load_profile
 from .review import (
-    Copy,
     Selection,
     UnreadComment,
     counters,
     metrics,
     parse_review_records,
-    select_reviews,
     trigger_statement,
     validate_review,
 )
@@ -64,25 +63,13 @@ def _repo(name: str) -> str:
 def _collect_reviews(gh: GitHub, repo: str, number: int) -> tuple[dict[str, Any], Selection]:
     """The state block plus the review events published on the issue and its candidate PRs
     (`CE-PROC-P3A-01`): every comment's claims become copies carrying the remote's publication metadata;
-    `select_reviews` groups them into distinct events, mirrors, conflicts and invalid headers."""
+    `select_reviews` groups them into distinct events, mirrors, conflicts and invalid headers
+    (`ops.published_reviews`)."""
     workflow = split_body(gh.issue(repo, number)["body"]).workflow
     invalid = errors(validate_workflow(workflow))
     if invalid:
         raise CheckFailed("current state invalid: " + "; ".join(map(str, invalid)))
-    comments = list(gh.issue_comments(repo, number))
-    for side, entry in candidates(workflow).items():
-        if isinstance(entry, dict) and entry.get("pr"):
-            comments += gh.issue_comments(REPOS[side], int(entry["pr"]))
-    copies: list[Copy] = []
-    unread: list[int | None] = []
-    for comment in comments:
-        try:
-            claims = parse_review_records(comment["body"])
-        except UnreadComment:  # R11: the whole comment is excluded, visibly; nothing partial is credited
-            unread.append(comment["id"])
-            continue
-        copies += [Copy(comment["created_at"], comment["id"], claim) for claim in claims]
-    return workflow, select_reviews(copies, str(workflow["work_package"]), unread)
+    return workflow, published_reviews(gh, repo, number, workflow)
 
 
 def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:

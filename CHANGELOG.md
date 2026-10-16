@@ -2,6 +2,39 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
+## 0.3.2 - closure route for a clean first review of a process or status WP (unreleased)
+
+Governing (CP-3) kit change, a state-machine routing fix: `EGAILab/minion-process#12`, filed by the
+Minion-Agent consumer on Owner decision (`minion-agent#222` issuecomment-6209854474). The Owner ordered it
+released as 0.3.2 from `v0.3.1`, so a 0.3.1 consumer can adopt it without 0.4.0. It is carried forward
+into 0.4.1.
+
+- `coordination-state.md` §10.2a and the transition table: a guarded `IMPLEMENTATION_REVIEW -> CLOSED`
+  for an explicit `process`/`status` WP with `requirements: []` before and after, no open or
+  provisionally closed finding (top-level or `convergence`) before or after, the latest published review
+  event a complete `APPROVED` `IMPLEMENTATION_REVIEW`/`PROCESS_REVIEW` of exactly the recorded candidate
+  SHAs (read from the published review headers, never a hand-recorded marker; a conflicting, unorderable,
+  unread or invalid header refuses), read for the current `work_package` from the issue and every
+  candidate PR the issue's edit history has recorded (an identity change in that history refuses), no
+  change in the closing patch to `work_package` or any candidate field but a newly recorded
+  `merged_sha`, every candidate PR merged with the approved head at its recorded
+  `merged_sha`, and each merge reachable from the default branch. The §10.2 historical-illegal list now
+  names `IMPLEMENTATION_REVIEW -> CLOSED` as illegal for any WP that owns product scope.
+- `WORKFLOW.md` §11.4 (a clean process/status WP closes directly, never entering
+  `FINAL_CONTRACT_REVIEW` with an unchanged candidate) and §12.6 (the new route's rejections).
+- `minion_process`: the transition table, `ops._first_review_closure` in the `commit_state` guard chain
+  (so `apply` and `close` both enforce it), and `ops.published_reviews`, shared with `convergence` and
+  `metrics`.
+  The `FINAL_CONTRACT_REVIEW -> CLOSED` and `CLOSURE_REVIEW -> CLOSED` guards are unchanged.
+- `tests/test_first_review_closure.py`: a refusal witness with zero writes for every guard clause, and
+  the review-1 regressions (KIT-032-R001 approval-source binding through the closing patch and the edit
+  history, R002 findings in every admitted location), each with its unchanged-context control.
+- The edit-history read fails closed (review 2): `GitHub.issue_revisions` keeps an edit whose body
+  GitHub does not return as `None` instead of dropping it (and `apply --repair` refuses such a
+  revision); the closure route refuses a null body or a state-bearing revision that does not parse, and
+  skips only a revision that positively has no state block.
+- Release: package and shipped profile versions raised to 0.3.2.
+
 ## 0.3.1 - lesson: shared build caches and mtime freshness (unreleased)
 
 Mechanical (CP-0) kit change from `EGAILab/minion-process#4`, proposed by the Minion-Agent consumer.
