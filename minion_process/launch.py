@@ -20,8 +20,11 @@ never silently starts a new session in place of the one the Owner meant to conti
 The recorded id has a provenance: `owner` (`session-record`, an id the Owner chose) or `herdr`
 (`session-observe`, an id herdr reported for the pane the session was launched in). An observation is
 recorded only when it names that pane, the session's tool and the project root as its working folder,
-and its id is not one the launch excluded: the id herdr reported for the pane before the launch, or
-the id already recorded by this launch. Anything else is ignored, never written."""
+and its id is not one the launch excluded: the id herdr reported for the pane before the launch, the
+id already recorded by this launch, and for a fresh launch the id recorded before it (a new session
+never has the old id). Anything else is ignored, never written. `relaunch.ps1` starts recording only
+when its pre-launch read of the pane succeeded; an unreadable pane disables recording for that launch,
+so the recorded target is kept."""
 
 from __future__ import annotations
 
@@ -70,6 +73,7 @@ class Plan:
     env: dict[str, str]
     argv: list[str]
     resume: str | None
+    previous: str | None
     state_file: str
 
     def as_json(self) -> str:
@@ -166,12 +170,13 @@ def plan(root: Path, name: str, resume: str | None = None, fresh: bool = False) 
         raise LaunchError(f"no session {name!r} in {SESSIONS_FILE} (have {sorted(sessions)})")
     entry = sessions[name]
     base = root.resolve()
+    previous = recorded(root, name)
     if fresh:
         chosen = None
     elif resume is not None:
         chosen = session_id(resume, "--resume")
     else:
-        chosen = recorded(root, name)
+        chosen = previous
         if chosen is None:
             raise LaunchError(
                 f"no recorded session for {name!r}: pass --resume <id> once, or --fresh for a new session"
@@ -195,7 +200,7 @@ def plan(root: Path, name: str, resume: str | None = None, fresh: bool = False) 
             *CODEX_TEMP,
         ]
     state = str(inside(root, STATE_DIR / f"{name}.json"))
-    return Plan(name, entry["tool"], str(base), env, argv, chosen, state)
+    return Plan(name, entry["tool"], str(base), env, argv, chosen, previous, state)
 
 
 def record(root: Path, name: str, value: str, provenance: dict[str, str] | None = None) -> Path:
@@ -213,14 +218,15 @@ def record(root: Path, name: str, value: str, provenance: dict[str, str] | None 
 
 
 def observe(root: Path, name: str, text: str, pane: str, exclude: list[str]) -> tuple[str | None, str]:
-    """Record the id in one `herdr agent get <pane>` result if it belongs to this launch (see the module
-    note). Returns the recorded id, or None and the reason nothing was written."""
+    """Record the id in one `herdr pane get` (or `agent get`) result if it belongs to this launch (see the
+    module note). Returns the recorded id, or None and the reason nothing was written."""
     sessions = load_sessions(root)
     if name not in sessions:
         raise LaunchError(f"no session {name!r} in {SESSIONS_FILE}")
     tool = sessions[name]["tool"]
     try:
-        agent = json.loads(text)["result"]["agent"]
+        result = json.loads(text)["result"]
+        agent = result["pane"] if "pane" in result else result["agent"]
         seen = {
             "pane": agent["pane_id"],
             "tool": agent["agent"],

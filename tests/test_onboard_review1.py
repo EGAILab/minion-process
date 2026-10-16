@@ -157,7 +157,10 @@ def test_r001_junction_below_the_root_is_refused_before_any_write(tmp_path: Path
 FAKE_PIP = """
 import json, os, pathlib, sys, sysconfig
 pathlib.Path(os.environ["FAKE_PIP_LOG"]).write_text(json.dumps({"argv": sys.argv[1:], "env": {
-    k: v for k, v in os.environ.items() if k.startswith(("PIP_", "PYTHON"))}}), encoding="utf-8")
+    k: v for k, v in os.environ.items() if k.startswith(("PIP_", "PYTHON", "TEMP"))}}), encoding="utf-8")
+cache = pathlib.Path(sys.argv[sys.argv.index("--cache-dir") + 1])
+(cache / "wheels").mkdir(parents=True, exist_ok=True)
+(cache / "wheels" / "probe.txt").write_text("probe", encoding="utf-8")
 site = pathlib.Path(sysconfig.get_paths()["purelib"])
 (site / "minion_process" / "bootstrap").mkdir(parents=True, exist_ok=True)
 (site / "minion_process" / "__init__.py").write_text("", encoding="utf-8")
@@ -219,6 +222,6 @@ def test_r001_link_inside_the_venv_is_refused(tmp_path: Path) -> None:
     junction(project / ".tmp" / "kit" / "0.4.0" / "venv" / "Lib" / "escape", sibling)
     env = {**os.environ, "FAKE_PIP_LOG": str(project / ".tmp" / "fake-pip.json")}
     result = install("-Root", str(project), "-Version", "0.4.0", "-From", "minion-process", env=env)
-    assert result.returncode != 0 and "junction or link inside" in result.stderr + result.stdout
+    assert result.returncode != 0 and "refusing a link, junction" in result.stderr + result.stdout
     assert not (project / ".tmp" / "fake-pip.json").exists()  # refused before pip ran
     assert list(sibling.iterdir()) == []

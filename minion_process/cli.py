@@ -105,7 +105,7 @@ def _local(args: argparse.Namespace) -> int:
         if args.command == "launch-plan":
             print(plan(root, args.session, args.resume, args.fresh).as_json())
             return 0
-        if args.command == "session-observe":  # reads one `herdr agent get` result on stdin
+        if args.command == "session-observe":  # reads one `herdr pane get` result on stdin
             recorded_id, reason = observe(root, args.session, sys.stdin.read(), args.pane, args.exclude)
             print(recorded_id or f"NOT-RECORDED: {reason}")
             return 0 if recorded_id else 2

@@ -8,7 +8,8 @@ relaunch.ps1 to <root>\.minion\ and writes <root>\.minion\kit.json (version and 
 
 Nothing is written outside the root:
 - no path component below the root may be a junction or link;
-- temp and the pip cache are under <root>\.tmp;
+- temp and the pip cache are a new folder under <root>\.tmp\kit\<version> for each run;
+- the venv may hold no link, junction or hard-linked file, and outputs are replaced by rename;
 - pip runs isolated, with no inherited destination or configuration.
 
 Installing a later version adds a new venv beside the old one and switches kit.json, so going back is
@@ -47,19 +48,51 @@ function Assert-Inside([string]$Path) {
     return $full
 }
 
-# No link anywhere under a folder this script writes into (the venv, after creation and after install).
-function Assert-NoLinks([string]$Path) {
+# Writes go only where no alias can lead outside the root:
+# - pip's cache and the children's temp folder are a new, empty folder created for this run;
+# - the venv is scanned before and after pip, and any symbolic link, junction or hard-linked file in it is
+#   refused (a hard link is not a reparse point, so a file could otherwise be shared with a file outside);
+# - kit.json and relaunch.ps1 are written to a new file and renamed over the old one, which replaces the
+#   directory entry and never writes into a file that may be linked elsewhere.
+$scanPy = @'
+import os, sys
+for top, dirs, files in os.walk(sys.argv[1]):
+    for name in dirs + files:
+        path = os.path.join(top, name)
+        if os.path.islink(path) or os.path.isjunction(path) or (name in files and os.lstat(path).st_nlink > 1):
+            print(path)
+            sys.exit(3)
+'@
+
+function Assert-NoAliases([string]$Interpreter, [string]$Path) {
     Assert-Inside $Path | Out-Null
-    $link = Get-ChildItem -LiteralPath $Path -Recurse -Force -Attributes ReparsePoint -ErrorAction Stop |
-        Select-Object -First 1
-    if ($link) { throw "refusing a junction or link inside ${Path}: $($link.FullName)" }
+    $found = (& $Interpreter -I $scan $Path)
+    if ($LASTEXITCODE -eq 3) { throw "refusing a link, junction or hard-linked file inside ${Path}: $found" }
+    if ($LASTEXITCODE) { throw "scanning $Path failed ($LASTEXITCODE)" }
+}
+
+function Set-NewFile([string]$Destination, [scriptblock]$Write) {
+    $target = Assert-Inside $Destination
+    $temp = Assert-Inside "$target.$PID.new"
+    if (Test-Path -LiteralPath $temp) { throw "refusing to reuse $temp" }
+    & $Write $temp
+    Assert-Inside $temp | Out-Null
+    Move-Item -LiteralPath $temp -Destination $target -Force
 }
 
 if (-not $From) { $From = "minion-process @ git+https://github.com/EGAILab/minion-process@v$Version" }
-$tmp = Assert-Inside (Join-Path $rootFull '.tmp')
-$venv = Assert-Inside (Join-Path $rootFull ".tmp\kit\$Version\venv")
-$cache = Assert-Inside (Join-Path $tmp 'pip-cache')
+$kitDir = Assert-Inside (Join-Path $rootFull ".tmp\kit\$Version")
+$venv = Assert-Inside (Join-Path $kitDir 'venv')
+$run = Assert-Inside (Join-Path $kitDir ("run-{0}-{1}" -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $PID))
 $minion = Assert-Inside (Join-Path $rootFull '.minion')
+if (Test-Path -LiteralPath $run) { throw "refusing an existing run folder $run" }
+New-Item -ItemType Directory -Force -Path $run | Out-Null
+Assert-Inside $run | Out-Null
+$cache = Assert-Inside (Join-Path $run 'pip-cache')
+$runTemp = Assert-Inside (Join-Path $run 'temp')
+New-Item -ItemType Directory -Path $cache, $runTemp | Out-Null
+$scan = Assert-Inside (Join-Path $run 'scan.py')
+[IO.File]::WriteAllText($scan, $scanPy)
 
 # The child processes get no inherited install destination or configuration: every PIP_* variable and
 # the Python path variables are removed, pip loads no configuration file and runs isolated, and the
@@ -70,7 +103,7 @@ foreach ($name in 'PYTHONPATH', 'PYTHONHOME', 'PYTHONUSERBASE', 'PYTHONSTARTUP',
 }
 $env:PYTHONNOUSERSITE = '1'
 $env:PIP_CONFIG_FILE = 'nul'
-$env:TEMP = $tmp; $env:TMP = $tmp
+$env:TEMP = $runTemp; $env:TMP = $runTemp
 
 if (-not (Test-Path -LiteralPath $venv)) {
     New-Item -ItemType Directory -Force -Path $venv | Out-Null
@@ -78,11 +111,11 @@ if (-not (Test-Path -LiteralPath $venv)) {
     & $Python -I -m venv $venv
     if ($LASTEXITCODE) { throw "creating the venv failed ($LASTEXITCODE)" }
 }
-Assert-NoLinks $venv
 $py = Join-Path $venv 'Scripts\python.exe'
+Assert-NoAliases $py $venv
 & $py -I -m pip install --isolated --no-input --disable-pip-version-check --quiet --cache-dir $cache $From
 if ($LASTEXITCODE) { throw "installing the kit failed ($LASTEXITCODE)" }
-Assert-NoLinks $venv
+Assert-NoAliases $py $venv
 $installed = (& $py -I -c "from importlib.metadata import version; print(version('minion-process'))").Trim()
 if ($installed -ne $Version) { throw "installed minion-process $installed, expected $Version" }
 $package = (& $py -I -c "import minion_process, os; print(os.path.realpath(minion_process.__file__))").Trim()
@@ -93,9 +126,9 @@ if (-not $package.StartsWith($venv + '\', [StringComparison]::OrdinalIgnoreCase)
 New-Item -ItemType Directory -Force -Path $minion | Out-Null
 Assert-Inside $minion | Out-Null
 $shipped = (& $py -I -c "from importlib import resources; print(resources.files('minion_process.bootstrap') / 'relaunch.ps1')").Trim()
-Copy-Item -LiteralPath $shipped -Destination (Assert-Inside (Join-Path $minion 'relaunch.ps1')) -Force
-$kitJson = @{ version = $Version; python = $py } | ConvertTo-Json
-[IO.File]::WriteAllText((Assert-Inside (Join-Path $minion 'kit.json')), $kitJson + "`n")
+Set-NewFile (Join-Path $minion 'relaunch.ps1') { param($t) Copy-Item -LiteralPath $shipped -Destination $t }
+$kitJson = (@{ version = $Version; python = $py } | ConvertTo-Json) + "`n"
+Set-NewFile (Join-Path $minion 'kit.json') { param($t) [IO.File]::WriteAllText($t, $kitJson) }
 
 Write-Output "minion-process $Version installed in $venv"
 Write-Output "next: list the sessions in $minion\sessions.yaml, then run"

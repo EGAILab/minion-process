@@ -28,8 +28,11 @@ The project's own rules still decide when it adopts. The kit never approves its 
 
    - It creates `<root>\.tmp\kit\0.4.0\venv` and installs the kit there.
    - Nothing is written outside the root:
-     - it refuses any junction or link below the root on the way to a destination, and inside the venv;
-     - temp and the pip cache are under `<root>\.tmp`;
+     - it refuses any junction or link below the root on the way to a destination;
+     - it refuses any link, junction or hard-linked file inside the venv, before and after pip;
+     - temp and the pip cache are a new folder for each run, `<root>\.tmp\kit\<version>\run-*`;
+     - `kit.json` and `relaunch.ps1` are written to a new file and renamed into place, never written
+       through an existing (possibly linked) file;
      - pip runs isolated, with every inherited `PIP_*` and Python path variable removed and no
        configuration file loaded;
      - it checks that the package is imported from the venv.
@@ -76,8 +79,10 @@ The project's own rules still decide when it adopts. The kit never approves its 
      - it is for this pane;
      - it names this session's tool;
      - its working folder is the project root;
-     - its id is neither the one the pane showed before the launch nor one already recorded.
-     Anything else is ignored, so a stale or foreign id never replaces a usable recorded one.
+     - its id is not the one the pane showed before the launch, not one already recorded, and for a
+       `-Fresh` launch not the id recorded before it.
+     Anything else is ignored, so a stale or foreign id never replaces a usable recorded one. If herdr
+     cannot be read before the launch, nothing is recorded for that launch and a warning says so.
    - Without a recorded id, the plan is refused rather than starting a new session by accident. Pass
      `-Resume <id>` once, or `-Fresh` for a new session.
    - After a relaunch, the PS-5 effective-policy check still applies.

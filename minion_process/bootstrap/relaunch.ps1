@@ -57,19 +57,34 @@ if ($Resume) {
 # launch (a stale one) or the one already recorded by this launch.
 $job = $null
 $pane = $env:HERDR_PANE_ID
+# The pre-launch read must succeed: a confirmed empty pane or a pane showing an id (excluded as stale).
+# If herdr cannot be read, nothing is recorded for this launch and the recorded target is kept.
+$baseline = $null
 if ($pane) {
-    $before = ''
-    try { $before = [string]((herdr agent get $pane) -join "`n" | ConvertFrom-Json).result.agent.agent_session.value }
-    catch { $before = '' }
-    $job = Start-Job -ArgumentList $py, $root, $Session, $pane, $before -ScriptBlock {
-        param($py, $root, $name, $pane, $before)
-        $exclude = @()
-        if ($before) { $exclude += $before }
+    try {
+        $seen = (herdr pane get $pane) -join "`n" | ConvertFrom-Json
+        if ($LASTEXITCODE -eq 0 -and $seen.result.pane.pane_id -eq $pane) {
+            $baseline = @()
+            $sid = $seen.result.pane.agent_session.value
+            if ($sid) { $baseline += [string]$sid }
+        }
+    }
+    catch { $baseline = $null }
+    if ($null -eq $baseline) { Write-Warning "herdr could not be read for pane $pane; this launch's session id is not recorded" }
+}
+if ($null -ne $baseline) {
+    if ($Fresh -and $plan.previous) { $baseline += [string]$plan.previous }  # a new session never has the old id
+    $poll = 5
+    if ($env:MINION_RELAUNCH_POLL_SECONDS -match '^[1-9][0-9]?$') { $poll = [int]$env:MINION_RELAUNCH_POLL_SECONDS }
+    $excluded = ($baseline | Where-Object { $_ }) -join ','  # session ids hold no ','
+    $job = Start-Job -ArgumentList $py, $root, $Session, $pane, $excluded, $poll -ScriptBlock {
+        param($py, $root, $name, $pane, $excluded, $poll)
+        $exclude = @(([string]$excluded).Split(',') | Where-Object { $_ })
         while ($true) {
-            Start-Sleep -Seconds 5
+            Start-Sleep -Seconds $poll
             $observeArgs = @('-I', '-m', 'minion_process', 'session-observe', '--root', $root, $name, '--pane', $pane)
-            foreach ($id in $exclude) { $observeArgs += @('--exclude', $id) }
-            $out = (herdr agent get $pane) -join "`n" | & $py @observeArgs
+            foreach ($id in $exclude) { if ($id) { $observeArgs += @('--exclude', $id) } }
+            $out = (herdr pane get $pane) -join "`n" | & $py @observeArgs
             if ($LASTEXITCODE -eq 0 -and $out) { $exclude += ([string]$out).Trim() }
         }
     }
