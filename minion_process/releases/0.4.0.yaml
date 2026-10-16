@@ -8,6 +8,16 @@ steps:
     actor: owner
     applies: all
     check: {kind: exists, path: .minion/kit.json}
+  - id: SKILL-CLAUDE
+    title: the kit-onboard skill is installed for Claude (.claude/skills/kit-onboard)
+    actor: owner
+    applies: claude
+    check: {kind: exists, path: .claude/skills/kit-onboard/SKILL.md}
+  - id: SKILL-CODEX
+    title: the kit-onboard skill is installed for Codex (.agents/skills/kit-onboard)
+    actor: owner
+    applies: codex
+    check: {kind: exists, path: .agents/skills/kit-onboard/SKILL.md}
   - id: SESSIONS
     title: the project's sessions are listed in .minion/sessions.yaml (Owner-controlled)
     actor: owner

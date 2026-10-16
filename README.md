@@ -21,7 +21,7 @@ routing.md                          delegated routes RT-1..RT-6 (in force per pr
 gate-tiers.md                       G0–G3 and the minimum tier per stage
 project-scope.md                    project scope by default: where agent settings, memory and temp live (PS-1..PS-7)
 onboarding.md                       moving a project to a kit release: install, onboard checklist, relaunch
-bootstrap/install.ps1               installs a kit release inside a project (Owner-run)
+bootstrap/install.ps1               installs a kit release inside a project (Owner-run), with the kit-onboard skill
 finding-taxonomy.md                 generic finding classes; a profile supplies aliases
 authority-dependencies.md           pinned external authority dependencies (verify + execute, never trust)
 requirement-id-convention.md        stable requirement IDs as traceability keys

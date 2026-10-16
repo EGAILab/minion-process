@@ -2,7 +2,7 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
-## 0.4.0 - project scope by default; onboarding tools (unreleased)
+## 0.4.0 - project scope by default; onboarding tools (2026-10-16)
 
 Normative kit change, ordered by the Owner on 2026-10-16 (`EGAILab/minion-agent#231`).
 
@@ -22,7 +22,17 @@ Normative kit change, ordered by the Owner on 2026-10-16 (`EGAILab/minion-agent#
     `<root>/.minion/sessions.yaml`;
   - `bootstrap/install.ps1`, which installs a release inside the project;
   - `relaunch.ps1`, shipped in the package, which relaunches a session with the PS-3 environment and
-    the PS-5 Codex line and records its session id for the next relaunch.
+    the PS-5 Codex line and records its session id for the next relaunch;
+  - the `kit-onboard` agent skill, installed by `install.ps1` into `.claude/skills/` and
+    `.agents/skills/`: it runs the checklist, does the agent-side steps, prepares every Owner step as
+    exact commands and records the result on the coordination issue.
+  - `.codex/rules/kit-sentinel.rules`, installed by `install.ps1` as its own file: it forbids the fake
+    command `minion-rules-sentinel`, so a refusal in the project's normal Codex session proves that
+    session loads the project's rules (`CODEX-RULES`). The inventory covers `~/.codex` and every
+    effective `CODEX_HOME` (session, sessions.yaml, user and machine environment). Migrated rules go into a new
+    `migrated-<date>.rules`, and no existing rules file is overwritten.
+- `project-scope.md` PS-2: `.claude/skills/` is a control file too, since a skill changes how an agent works.
+- Release: package and shipped profile versions raised to 0.4.0.
 
 ## 0.3.1 - lesson: shared build caches and mtime freshness (unreleased)
 
