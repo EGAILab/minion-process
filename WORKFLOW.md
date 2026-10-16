@@ -642,7 +642,9 @@ known convergence finding remains open. A **mechanical** WP (§4.3) follows draf
 → remediation → targeted closure → final review of the changed candidate; it has no convergence
 episode, and a trigger firing on it upgrades its class instead (`routing.md` RT-5). `FINAL_CONTRACT_REVIEW` is for a candidate that CHANGED after
 the first `IMPLEMENTATION_REVIEW`; a truly clean first review merges directly without a second full
-review of the same content.
+review of the same content. A `process` or `status` WP has no Rust side, so after a clean first review
+and the merge it closes directly through the guarded `IMPLEMENTATION_REVIEW -> CLOSED` route
+(`coordination-state.md` §10.2a); it never enters `FINAL_CONTRACT_REVIEW` with an unchanged candidate.
 
 ### 11.5 Default branches are accepted milestones
 
@@ -982,7 +984,12 @@ closed findings, when the ordinary-remediation route still has blocking findings
 route applies (route detection uses whether a convergence record exists for the candidate, never whether
 the episode is "active", `coordination-state.md` §6, §11); a transition to the second implementation
 before the shared contract is approved and merged; a provisional closure without its negative-control
-evidence (§11.8.7.1). The validator enforces structure only. Every automated body mutation performs the
+evidence (§11.8.7.1); an `IMPLEMENTATION_REVIEW -> CLOSED` transition for any WP that is not an explicit
+`process`/`status` kind with `requirements: []`, has an open or provisionally closed finding in any
+location, lacks a latest published complete APPROVED review of the exact final candidate (read for the
+current identity from every candidate PR the issue's history has recorded), whose closing patch changes
+the WP identity or a candidate, or has a candidate not merged at its recorded SHA on the default branch
+(`coordination-state.md` §10.2a). The validator enforces structure only. Every automated body mutation performs the
 §11.1.1 post-write re-fetch and full equivalence check, and the re-fetched state passes the validator.
 
 ### 12.7 Moving rules from prompts to enforcement

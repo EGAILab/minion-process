@@ -372,6 +372,7 @@ def test_restore_then_owner_blocked_resume_without_provenance_is_refused() -> No
         (lambda f: None, "not in issue"),  # unknown revision id (see below)
         (lambda f: setattr(f, "history_fails", True), "edit history"),
         (lambda f: f.revisions.update({(CODE, 10): [("UCE_x", "junk")]}), "does not parse"),
+        (lambda f: f.revisions.update({(CODE, 10): [("UCE_x", None)]}), "no readable body"),
         (
             lambda f: f.revisions.update(
                 {(CODE, 10): [("UCE_x", render_body({"workflow": workflow(status="X")}, ""))]}
@@ -379,7 +380,13 @@ def test_restore_then_owner_blocked_resume_without_provenance_is_refused() -> No
             "not a valid state",
         ),
     ],
-    ids=["unknown-revision", "history-fetch-fails", "unparseable-revision", "invalid-revision"],
+    ids=[
+        "unknown-revision",
+        "history-fetch-fails",
+        "unparseable-revision",
+        "null-revision-body",
+        "invalid-revision",
+    ],
 )
 def test_repair_refusals_write_nothing(setup: Any, match: str) -> None:
     corrupted = copy.deepcopy(SCOPING)
@@ -560,7 +567,8 @@ def test_issue_revisions_follow_pagination() -> None:
         seen.append(args)
         return json.dumps({"data": {"repository": {"issue": {"userContentEdits": next(pages)}}}})
 
-    assert GitHub(run).issue_revisions(CODE, 10) == [("A", "a"), ("B", "b")]
+    # a node without a readable body is kept as None, never dropped (KIT-032-R001)
+    assert GitHub(run).issue_revisions(CODE, 10) == [("A", "a"), ("B", "b"), ("C", None)]
     assert "c=C1" in seen[1]
 
 

@@ -45,7 +45,8 @@ def test_apply_dry_run_and_failure(
     fake: FakeGitHub, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     patch = tmp_path / "p.py"
-    patch.write_text("ALLOWED = {'status'}\ndef apply(w):\n    w['status'] = 'CLOSED'\n", encoding="utf-8")
+    illegal = "ALLOWED = {'status'}\ndef apply(w):\n    w['status'] = 'PYTHON_IMPLEMENTATION'\n"
+    patch.write_text(illegal, encoding="utf-8")
     assert run(fake, "apply", "10", str(patch)) == 1
     assert "illegal transition" in capsys.readouterr().err
     patch.write_text("ALLOWED = set()\ndef apply(w):\n    return 'new prose'\n", encoding="utf-8")

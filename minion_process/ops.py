@@ -11,6 +11,7 @@ from typing import Any
 
 from .github import REPOS, GitHub, GitHubError, same_text
 from .model import NON_ACTIONABLE, BodyFormatError, candidates, render_body, split_body
+from .review import Copy, Selection, UnreadComment, parse_review_records, select_reviews
 from .transitions import check_transition
 from .validate import errors, validate_workflow
 
@@ -81,7 +82,8 @@ def classification_guard(old: dict[str, Any], new: dict[str, Any]) -> str | None
       `consequence.downgrade` with the Owner decision and the consenting reviewer, and a recorded
       `governance_source`. The tool checks presence; the agent validates the source (§11.10).
     - **Closure routes by kind.** `FINAL_CONTRACT_REVIEW -> CLOSED` (§10.2) is for `process`/`status`
-      kinds; `SCOPING -> CLOSED` (§10.3) is for `scoping`. A semantic or delta WP closes through
+      kinds, and so is `IMPLEMENTATION_REVIEW -> CLOSED` (§10.2a, `_first_review_closure`);
+      `SCOPING -> CLOSED` (§10.3) is for `scoping`. A semantic or delta WP closes through
       `CLOSURE_REVIEW` only.
     - **Classification is sticky** (`PROC-KIT-P2-R001`): once recorded, `kind` and `consequence` are never
       removed or nulled, so a class cannot be laundered through an unclassified state; any effective
@@ -225,6 +227,217 @@ def _scoping_closure(gh: GitHub, old: dict[str, Any], new: dict[str, Any]) -> st
     return None
 
 
+def _candidate_prs(workflow: dict[str, Any]) -> set[tuple[str, int]]:
+    """The (repository, PR number) of every candidate the workflow records."""
+    return {
+        (REPOS[side], int(entry["pr"]))
+        for side, entry in candidates(workflow).items()
+        if isinstance(entry, dict) and entry.get("pr")
+    }
+
+
+def published_reviews(
+    gh: GitHub,
+    repo: str,
+    number: int,
+    workflow: dict[str, Any],
+    prs: set[tuple[str, int]] | None = None,
+) -> Selection:
+    """The review events published on the coordination issue and on the candidate PRs (`CE-PROC-P3A-01`):
+    every comment's claims become copies carrying the remote's publication metadata; `select_reviews`
+    groups them into distinct events, mirrors, conflicts and invalid headers. `prs` defaults to the
+    workflow's current candidate PRs."""
+    comments = list(gh.issue_comments(repo, number))
+    for pr_repo, pr_number in sorted(_candidate_prs(workflow) if prs is None else prs):
+        comments += gh.issue_comments(pr_repo, pr_number)
+    copies: list[Copy] = []
+    unread: list[int | None] = []
+    for comment in comments:
+        try:
+            claims = parse_review_records(comment["body"])
+        except UnreadComment:  # R11: the whole comment is excluded, visibly; nothing partial is credited
+            unread.append(comment["id"])
+            continue
+        copies += [Copy(comment["created_at"], comment["id"], claim) for claim in claims]
+    return select_reviews(copies, str(workflow["work_package"]), unread)
+
+
+FIRST_REVIEW_CLOSURE_KINDS = ("process", "status")
+FIRST_REVIEW_TYPES = ("IMPLEMENTATION_REVIEW", "PROCESS_REVIEW")
+"""The published review types that can be the clean first review of a process/status WP (§10.2a)."""
+
+
+def _outstanding_findings(workflow: dict[str, Any]) -> list[Any]:
+    """Every finding the state still carries as not finally closed, in every location the validator
+    admits: `open_findings` and `provisionally_closed`, at the top level and under `convergence`
+    (KIT-032-R002)."""
+    found: list[Any] = []
+    for scope in (workflow, workflow.get("convergence")):
+        if isinstance(scope, dict):
+            for key in ("open_findings", "provisionally_closed"):
+                found += list(scope.get(key) or [])
+    return found
+
+
+def _same_candidates(old: dict[str, Any], new: dict[str, Any]) -> bool:
+    """The closing patch keeps every candidate's identity: the same sides, and per side the same `pr`,
+    `sha`, `base` and any other field. Only `merged_sha` may be recorded, never changed (KIT-032-R001)."""
+    before = {side: c for side, c in candidates(old).items() if c is not None}
+    after = {side: c for side, c in candidates(new).items() if c is not None}
+    if set(before) != set(after):
+        return False
+    for side, entry in after.items():
+        prior = before[side]  # both validated: a candidate side is a mapping or null
+        strip = {k: v for k, v in entry.items() if k != "merged_sha"}
+        if strip != {k: v for k, v in prior.items() if k != "merged_sha"}:
+            return False
+        if prior.get("merged_sha") not in (None, entry.get("merged_sha")):
+            return False
+    return True
+
+
+STATE_MARKERS = ("```yaml", "```yml", "~~~yaml", "~~~yml", "workflow:")
+
+
+def _stateless(body: str) -> bool:
+    """True only when a revision positively carries no state block: no YAML fence opener and no
+    `workflow:` key anywhere, compared case-insensitively. Anything else must parse (KIT-032-R001)."""
+    folded = body.casefold()
+    return not any(marker in folded for marker in STATE_MARKERS)
+
+
+def _approval_sources(
+    gh: GitHub, repo: str, number: int, current: dict[str, Any]
+) -> tuple[set[tuple[str, int]], str | None]:
+    """Every candidate PR this coordination issue has ever recorded, from GitHub's own edit history of the
+    issue body plus the current state, so a candidate re-pointed in an earlier ordinary patch cannot hide
+    a review published on its earlier PR. History fails closed (KIT-032-R001, review 2): a revision is
+    skipped only when it positively carries no state block (`_stateless`). Refuses (second value) when the
+    history cannot be fetched, a revision's body is unreadable (`None`), a state-bearing revision does not
+    parse or records an unreadable candidate, or the work-package identity ever differed from the current
+    one."""
+    prs = _candidate_prs(current)
+    try:
+        revisions = gh.issue_revisions(repo, number)
+    except GitHubError as error:
+        return prs, f"cannot read the issue's edit history to bind the approval source: {error}"
+    for revision_id, body in revisions:
+        if body is None:
+            return prs, f"revision {revision_id} of the issue body is unreadable; refused (§10.2a)"
+        if _stateless(body):
+            continue  # positively no state block: it records no candidate and no identity
+        try:
+            state = split_body(body).workflow
+        except BodyFormatError as error:
+            return prs, f"revision {revision_id} carries a state block that does not parse ({error}) (§10.2a)"
+        if state.get("work_package") != current["work_package"]:
+            return prs, (
+                f"the issue recorded work package {state.get('work_package')!r} before "
+                f"{current['work_package']!r}; an identity change cannot borrow an approval (§10.2a)"
+            )
+        try:
+            prs |= _candidate_prs(state)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return prs, "an earlier revision records a candidate PR this route cannot read; refused (§10.2a)"
+    return prs, None
+
+
+def _first_review_closure(
+    gh: GitHub, repo: str, number: int, old: dict[str, Any], new: dict[str, Any]
+) -> str | None:
+    """`IMPLEMENTATION_REVIEW -> CLOSED` is legal only for a clean process-only or status-only work package
+    whose first independent review approved the exact candidate (`coordination-state.md` §10.2a,
+    `minion-process#12`). Every clause is checked against the current and intended state and against
+    GitHub, never against a hand-recorded marker:
+
+    1. `kind` is explicitly `process` or `status`;
+    2. `requirements` is an explicit `[]` before and after;
+    3. no finding that is not finally closed, before or after, in any admitted location: `open_findings`
+       and `provisionally_closed`, at the top level and under `convergence` (the closing patch cannot
+       clear one; KIT-032-R002);
+    4. the latest published review event of the WP (a complete, readable, conflict-free selection) is a
+       `complete: true`, `APPROVED` `IMPLEMENTATION_REVIEW`/`PROCESS_REVIEW` whose candidate map is
+       exactly the recorded candidates' SHAs (independence and zero blocking findings are enforced by
+       the review-header validator). The approval source is bound to the current state, never the
+       intended one: reviews are read for the current `work_package` from the coordination issue and
+       from every candidate PR the issue's edit history has ever recorded, and an identity that ever
+       changed refuses (KIT-032-R001);
+    5. the closing patch keeps `work_package` and every candidate's sides, `pr`, `sha` and `base`; it may
+       only record `merged_sha`;
+    6. every candidate PR is `MERGED`, its head is the approved SHA and its merge commit is the recorded
+       `merged_sha`;
+    7. each merge commit is reachable from its repository's default branch.
+
+    The coordination-state round trip (the eighth clause) is `commit_state`'s own. Semantic and delta WPs,
+    unapproved or stale approvals, unmerged candidates and open findings are refused; they keep the
+    existing routes (§10.2 `FINAL_CONTRACT_REVIEW -> CLOSED`, `CLOSURE_REVIEW -> CLOSED`)."""
+    if not (old["status"] == "IMPLEMENTATION_REVIEW" and new["status"] == "CLOSED"):
+        return None
+    route = "IMPLEMENTATION_REVIEW -> CLOSED"
+    kind = new.get("kind")
+    if kind not in FIRST_REVIEW_CLOSURE_KINDS:
+        return (
+            f"{route} is for a clean process or status WP; kind is {kind!r}. A semantic or delta WP closes "
+            "through CLOSURE_REVIEW (§10.2a, §14)"
+        )
+    if old.get("requirements") != [] or new.get("requirements") != []:
+        return f"{route} requires requirements to be an explicit [] before and after the transition (§10.2a)"
+    if _outstanding_findings(old) or _outstanding_findings(new):
+        return (
+            "cannot close with open findings (top-level or convergence, provisionally closed included), and "
+            "the closing patch cannot clear them (§4.3, §10.2a)"
+        )
+    if new.get("work_package") != old.get("work_package"):
+        return f"{route}: the closing patch may not change work_package (§10.2a)"
+    present = {side: c for side, c in candidates(new).items() if c is not None}
+    if not present:
+        return f"{route} requires at least one recorded candidate (§4.3)"
+    for side, candidate in present.items():
+        if not (
+            isinstance(candidate, dict)
+            and candidate.get("pr")
+            and candidate.get("sha")
+            and candidate.get("merged_sha")
+        ):
+            return f"cannot close before the {side} candidate records its pr, sha and merged_sha (§4.3)"
+    final = {side: c["sha"] for side, c in present.items()}
+    if not _same_candidates(old, new):
+        return (
+            f"{route}: the closing patch changed the candidate (sides, pr, sha or base); only merged_sha "
+            "may be recorded (§10.2a)"
+        )
+    sources, refusal = _approval_sources(gh, repo, number, old)
+    if refusal:
+        return f"{route}: {refusal}"
+    selection = published_reviews(gh, repo, number, old, sources)
+    if not selection.complete or selection.conflicts or selection.invalid_total:
+        return (
+            f"{route} needs an unambiguous published review record: {len(selection.unread_comments)} unread "
+            f"comment(s), {selection.unorderable} unorderable, {len(selection.conflicts)} conflict(s), "
+            f"{selection.invalid_total} invalid header(s) (§10.2a)"
+        )
+    if not selection.events:
+        return f"{route} requires a published review of the exact candidate; none found (§10.2a)"
+    latest = selection.events[-1]
+    label = f"{route}: latest review ({latest['reviewer']}, round {latest['round']}, {latest['type']})"
+    if latest["verdict"] != "APPROVED" or latest["complete"] is not True:
+        return f"{label} is {latest['verdict']} complete={latest['complete']}, not a complete APPROVED"
+    if latest["type"] not in FIRST_REVIEW_TYPES:
+        return f"{label} is not one of {', '.join(FIRST_REVIEW_TYPES)} (§10.2a)"
+    if latest["candidate"] != final:
+        return f"{label} approved {latest['candidate']}, not the exact final candidate {final} (§10.2a)"
+    for side, candidate in present.items():
+        target, merged, number_ = REPOS[side], candidate["merged_sha"], candidate["pr"]
+        pr = gh.pr(target, number_)
+        if pr.get("state") != "MERGED" or (pr.get("mergeCommit") or {}).get("oid") != merged:
+            return f"{side} PR #{number_} is not merged at {merged[:12]} (§10.2a)"
+        if pr.get("headRefOid") != candidate["sha"]:
+            return f"{side} PR #{number_} merged head is not the approved {candidate['sha'][:12]} (§11.3)"
+        if not gh.contains(target, gh.default_branch(target), merged):
+            return f"{side} merge {merged[:12]} is not on the default branch (§10.2a)"
+    return None
+
+
 def commit_state(
     gh: GitHub,
     repo: str,
@@ -269,6 +482,7 @@ def commit_state(
         or classification_guard(old, new_workflow)
         or _process_closure(old, new_workflow)
         or _scoping_closure(gh, old, new_workflow)
+        or _first_review_closure(gh, repo, number, old, new_workflow)
     )
     if reason:
         raise CheckFailed(reason)
@@ -330,6 +544,8 @@ def restore_revision(gh: GitHub, repo: str, number: int, revision_id: str, dry_r
     if not matches:
         raise CheckFailed(f"revision {revision_id!r} is not in issue #{number}'s edit history")
     baseline = matches[0]
+    if baseline is None:
+        raise CheckFailed(f"revision {revision_id} has no readable body in GitHub's edit history")
     try:
         baseline_state = split_body(baseline)
         baseline_errors = errors(validate_workflow(baseline_state.workflow))
