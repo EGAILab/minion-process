@@ -86,6 +86,9 @@ def test_codex_rules_runbook_reads_every_file_and_never_overwrites() -> None:
     """Step E reads all user-level rules files and installs migrated lines as a new file only."""
     text = skill_text()
     step = text.split("\nE. ")[1]
-    assert "`~/.codex/rules/*.rules`" in step
+    assert "`<home>/rules/*.rules`" in step
+    # The effective user-level home, not only the default one (KIT-RELEASE-R002, round 3).
+    assert "`CODEX_HOME`" in step and "[Environment]::GetEnvironmentVariable('CODEX_HOME', 'User')" in step
+    assert '"<home>\\rules\\<file>.rules"' in step and "$HOME\\.codex" not in step
     assert "migrated-<date>.rules" in step and "if (Test-Path -LiteralPath $new) { throw" in step
     assert '\\.codex\\rules\\default.rules"' not in step

@@ -93,11 +93,16 @@ D. Relaunch each session in its own pane after the agent has exited. Check first
    The id is in herdr `pane get` (`agent_session.value`). Later relaunches need no id.
 E. Codex sessions only: project-specific approvals live in the project, not in the user-level rules
    (`CODEX-RULES`). You prepare it:
-   1. Read every user-level rules file, `~/.codex/rules/*.rules`, not only `default.rules`. Reading is
-      allowed; never write them.
-   2. List the rules that name this project (its paths, repositories, branches or commands), each with
-      its file and line.
-   3. If there are none, post that evidence (each file's sha256 and the lines you checked) and go to 5.
+   1. Find each Codex session's effective user-level home, `<home>`: its `CODEX_HOME` when set, otherwise
+      `~/.codex`. Check every place that can set it: your own session (`$env:CODEX_HOME`), each Codex
+      entry's `env` in `.minion/sessions.yaml`, and the Owner's user and machine environment
+      (`[Environment]::GetEnvironmentVariable('CODEX_HOME', 'User')`, and the same with `'Machine'`).
+      Inventory `~/.codex` and every distinct `<home>` found. List each home with the sessions that use it.
+   2. Read every rules file in each home, `<home>/rules/*.rules`, not only `default.rules`. Reading is
+      allowed; never write them. List the rules that name this project (its paths, repositories,
+      branches or commands), each with its home, file and line.
+   3. If there are none, post that evidence (the homes, each file's sha256 and the lines you checked)
+      and go to 5.
    4. Otherwise, commit those exact lines for review under `process/enforcement/codex-rules.rules`. Then
       post the Owner commands. They install the reviewed lines as a **new** file and change no existing
       project rules file:
@@ -106,14 +111,17 @@ E. Codex sessions only: project-specific approvals live in the project, not in t
       New-Item -ItemType Directory -Force $rules | Out-Null
       if (Test-Path -LiteralPath $new) { throw "$new exists; choose another name" }
       Copy-Item "<reviewed process\enforcement\codex-rules.rules>" $new
-      Copy-Item "$HOME\.codex\rules\<file>.rules" "<root>\.tmp\<file>.rules.before-<date>"   # each file listed in 2
+      Copy-Item "<home>\rules\<file>.rules" "<root>\.tmp\<home-label>-<file>.rules.before-<date>"   # each home and file listed in 2
       ```
-      Ask the Owner to remove exactly the listed lines from the listed user-level files, and nothing else.
+      Ask the Owner to remove exactly the listed lines from the listed files in each listed home, and
+      nothing else.
       Rules for other projects, and rules of general use, stay.
    5. Loading proof, in your own session after the relaunch (step D):
       - The installer ships `.codex\rules\kit-sentinel.rules`, which forbids the command
         `minion-rules-sentinel`.
       - Run `minion-rules-sentinel`. It must be refused by the rule, not fail as an unknown command.
         That shows your normal session loads this project's rules folder.
+      - Record your session's `$env:CODEX_HOME` with the result. If that home is not one listed in 1,
+        the inventory is incomplete: go back to 1.
       - For each migrated file, also record `codex execpolicy check -r <file> <one listed command>`, as
         a syntax check.
