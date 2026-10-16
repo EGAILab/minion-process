@@ -30,6 +30,6 @@ permission dialog. Check `herdr agent get` first. Never type, relay or send an a
 
 ## Independent review
 
-Kit PRs are reviewed by a session that did not author them: Claude `w1:p1` by the Owner's preference,
-or Codex `w1:p2`. Publish a reviewer's verdict verbatim with its file hash when the reviewer cannot
-post it.
+Kit PRs are reviewed by a session that did not author them. The reviewer for process and architecture
+work is Codex `Gru-Maestro/Review-Codex` (pane `w9:p4`, Owner, 2026-10-15). Publish a reviewer's verdict
+verbatim with its file hash when the reviewer cannot post it.

@@ -38,9 +38,9 @@ Notes:
 - `autoMemoryDirectory` takes an absolute path; Claude Code shows a trust warning at launch when a project
   sets it. The warning is expected.
 - A project's **control files** are Owner-controlled: `<root>/.claude/settings*.json`,
-  `<root>/.claude/hooks/`, `<root>/.codex/`, `<root>/.agents/` and `<root>/.minion/` (the kit install
-  record, `relaunch.ps1` and the session list, `onboarding.md`). They hold the hooks, the
-  sandbox-related settings and the memory location. The memory notes in `<root>/.claude/memory/` are not
+  `<root>/.claude/hooks/`, `<root>/.claude/skills/`, `<root>/.codex/`, `<root>/.agents/` and
+  `<root>/.minion/` (the kit install record, `relaunch.ps1` and the session list, `onboarding.md`).
+  They hold the hooks, the skills, the sandbox-related settings and the memory location. The memory notes in `<root>/.claude/memory/` are not
   control files and stay writable.
 - An agent never edits an installed control file. A proposed change is committed for review in the
   project's repository (for example under `process/enforcement/`), and the Owner installs the reviewed
@@ -107,7 +107,8 @@ records why PS-1 to PS-5 are not enough.
 - **Codex:** the `workspace-write` sandbox with the root as the only writable root, checked as in PS-5.
   Codex itself protects `.codex/`, `.agents/` and `.git/` inside a writable root. It does **not** protect
   Claude's control files, and Claude's hook does not see Codex's tools. Codex is held off
-  `<root>/.claude/settings*.json` and `<root>/.claude/hooks/` in one of two ways:
+  `<root>/.claude/settings*.json`, `<root>/.claude/hooks/` and `<root>/.claude/skills/` in one of two
+  ways:
   - by an Owner-applied operating-system deny-write on those paths for the sandbox, with its own denial
     witness; or
   - where none is applied, by the binding instruction only. That case is a gap recorded for the Owner,

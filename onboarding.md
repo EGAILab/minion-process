@@ -37,6 +37,9 @@ The project's own rules still decide when it adopts. The kit never approves its 
        configuration file loaded;
      - it checks that the package is imported from the venv.
    - It copies `relaunch.ps1` to `<root>\.minion\` and writes `<root>\.minion\kit.json`.
+   - It installs the `kit-onboard` skill for Claude (`.claude\skills\`) and Codex (`.agents\skills\`).
+     Invoking it (`/kit-onboard`, or asking the agent to onboard the project) runs steps 2 to 5 below on
+     the agent side and prepares each Owner step as exact commands.
    - A later version is installed beside the old one, and `kit.json` switches to it. Going back is
      re-running the script with the old version.
 2. **List the sessions once** in `<root>\.minion\sessions.yaml`. This is an Owner-controlled file

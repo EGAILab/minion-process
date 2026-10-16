@@ -247,6 +247,8 @@ def adopted(root: Path, memory: str) -> None:
     (root / ".claude").mkdir(exist_ok=True)
     settings = {"autoMemoryDirectory": memory, "hooks": {"PreToolUse": []}}
     (root / ".claude/settings.json").write_text(json.dumps(settings), encoding="utf-8")
+    (root / ".claude/skills/kit-onboard").mkdir(parents=True)
+    (root / ".claude/skills/kit-onboard/SKILL.md").write_text("skill", encoding="utf-8")
 
 
 def test_onboard_adopted_claude_project_passes(tmp_path: Path) -> None:
@@ -274,7 +276,7 @@ def test_onboard_cli_markdown_and_exit(tmp_path: Path, capsys: pytest.CaptureFix
     assert main(["onboard", "--root", str(tmp_path), "--from", "0.3.1", "--to", "0.4.0", "--markdown"]) == 1
     out = capsys.readouterr().out
     assert out.startswith("### Kit onboarding 0.3.1 -> 0.4.0") and "- [ ] `0.4.0` **KIT-INSTALL**" in out
-    assert out.rstrip().endswith("5 TODO, 6 MANUAL") and "INCOMPLETE" in out
+    assert out.rstrip().endswith("7 TODO, 6 MANUAL") and "INCOMPLETE" in out
     assert main(["onboard", "--root", str(tmp_path), "--from", "0.3.1", "--to", "0.4.0"]) == 1
     assert "TODO   0.4.0 KIT-INSTALL [owner]" in capsys.readouterr().out
     assert main(["onboard", "--root", str(tmp_path), "--from", "0.4.0", "--to", "0.3.0"]) == 1

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "minion-process"
-version = "0.3.0"
+version = "0.4.0"
 description = "Minion-Process: the reusable two-agent process kit and its workflow-mechanics CLI"
 requires-python = ">=3.12"
 dependencies = ["pyyaml>=6", "markdown-it-py>=3,<5"]
@@ -17,7 +17,7 @@ packages = ["minion_process", "minion_process.releases", "minion_process.bootstr
 
 [tool.setuptools.package-data]
 "minion_process.releases" = ["*.yaml"]
-"minion_process.bootstrap" = ["*.ps1"]
+"minion_process.bootstrap" = ["*.ps1", "skills/*/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

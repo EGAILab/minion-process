@@ -170,6 +170,9 @@ site = pathlib.Path(sysconfig.get_paths()["purelib"])
 (site / "minion_process" / "__init__.py").write_text("", encoding="utf-8")
 (site / "minion_process" / "bootstrap" / "__init__.py").write_text("", encoding="utf-8")
 (site / "minion_process" / "bootstrap" / "relaunch.ps1").write_text("# fake", encoding="utf-8")
+skill = site / "minion_process" / "bootstrap" / "skills" / "kit-onboard"
+skill.mkdir(parents=True, exist_ok=True)
+(skill / "SKILL.md").write_text("# skill", encoding="utf-8")
 meta = site / "minion_process-0.4.0.dist-info"
 meta.mkdir(exist_ok=True)
 metadata = "Metadata-Version: 2.1\\nName: minion-process\\nVersion: 0.4.0\\n"
@@ -215,6 +218,10 @@ def test_r004_inherited_pip_destination_and_config_do_not_reach_pip(tmp_path: Pa
     assert list(sibling.iterdir()) == []
     assert json.loads((project / ".minion" / "kit.json").read_text(encoding="utf-8"))["version"] == "0.4.0"
     assert (project / ".minion" / "relaunch.ps1").read_text(encoding="utf-8") == "# fake"
+    for base in (".claude", ".agents"):
+        assert (project / base / "skills" / "kit-onboard" / "SKILL.md").read_text(
+            encoding="utf-8"
+        ) == "# skill"
 
 
 @windows

@@ -1,6 +1,6 @@
 # Minion-Process profile -- the only project-specific process file.
 # Copy to <docs repo>/process/profile.yaml and run: python -m minion_process profile validate process/profile.yaml
-kit: {version: "0.3.0", source: EGAILab/minion-process}
+kit: {version: "0.4.0", source: EGAILab/minion-process}
 project: example-project
 
 authority:                                # semantic authority chain, highest first
