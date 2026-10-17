@@ -94,6 +94,14 @@ The project's own rules still decide when it adopts. The kit never approves its 
 5. **Raise the profile pin** (`kit.version`) through the project's own review. Record the completed
    checklist on the coordination issue.
 
+## Onboarding to the Orchestrator (kit 0.4.2)
+
+A project joins Gru-Maestro's Orchestrator with the pack in `orchestrator.md` OR-5:
+1. one opt-in PR rendered by `minion-process orch-render`;
+2. the Owner's steps F, H and G, all non-elevated;
+3. the witness rows;
+4. binding and `ACTIVATE` by the Orchestrator, which the Owner pre-authorized.
+
 ## Upgrading later
 
 Repeat steps 1, 3, 4 and 5 with the new version: `onboard --from <old> --to <new>` lists the steps of

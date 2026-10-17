@@ -657,6 +657,9 @@ is durably represented in default-branch state and assurance evidence.
 Follow the repository ruleset: PR required, conversation resolution required, squash merge, linear
 history, force pushes and default-branch deletion blocked. Formal approval count may remain `0` while
 the agents lack reliably distinct GitHub identities; procedural independence is still mandatory.
+In a project activated on Gru-Maestro's Orchestrator, the implementer merges its own PR after an
+independent APPROVE at the exact SHA, with no further approval, and reviews default to one round with
+blocking findings only plus one re-review (`orchestrator.md` OR-2, OR-3).
 
 ### 11.7 Owner role
 
@@ -684,6 +687,10 @@ it with its rule ID in `history.routes` instead of asking. `RT-6`, the convergen
 notify-and-proceed, never silent. The Owner-only list stays open-ended and includes consequence-class
 downgrades, remote creation, risk acceptance and amending the delegation itself. With
 `delegation.routing: false` the coordinator asks as before.
+
+**Orchestrator.** For a project activated on Gru-Maestro's Orchestrator, job management (dispatch,
+hand-offs, closing, drain sequences, onboarding) belongs to the Orchestrator, which asks the Owner
+directly for Owner decisions on a job; the kit owner maintains the workflow (`orchestrator.md` OR-1).
 
 ### 11.8 Contract convergence protocol
 

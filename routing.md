@@ -40,6 +40,14 @@ Each Owner question is filed with its options packet and the default the process
 so the Owner can answer "default" in one word. Closing the list is revisited after P2 and P3, using the
 per-work-package metric "Owner questions, split into routing vs semantic vs risk" (§14.6).
 
+## Orchestrator-managed projects
+
+For a project activated on Gru-Maestro's Orchestrator, `orchestrator.md` adds:
+- the Orchestrator starts, hands off and closes jobs, and asks the Owner directly for Owner decisions
+  on a job (OR-1);
+- the implementer merges its own PR after an independent APPROVE at the exact SHA (OR-2);
+- reviews default to one round, blocking findings only, plus one re-review (OR-3).
+
 ## Unchanged
 
 Routing never bypasses implementer-reviewer separation, exact-SHA approval, negative controls,

@@ -1,0 +1,2 @@
+# The Orchestrator pack is installed byte for byte; its rendered files must match reviewed LF bytes.
+minion_process/bootstrap/orchestrator/** text eol=lf

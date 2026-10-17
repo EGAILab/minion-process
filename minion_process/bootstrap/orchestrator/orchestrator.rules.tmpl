@@ -1,0 +1,32 @@
+# {{SHORT}}: {{CODEX_SESSION}}'s route to the Orchestrator (Owner decision 2026-10-17,
+# minion-agent#231 issuecomment-6224484620, option 1).
+# The Owner installs this file at {{PROJECT}}/.codex/rules/{{RULES_FILE}}.
+# It allows exactly `herdr agent prompt ...` and `herdr agent get ...` to run
+# outside the sandbox without a prompt. Do not widen it.
+
+# No absolute-path spelling may use the rule below: only the bare word `herdr`,
+# resolved from the launch PATH, matches. Without this, a path such as
+# `<workspace>\herdr.exe agent get x` would match by basename.
+host_executable(
+    name = "herdr",
+    paths = [],
+)
+
+prefix_rule(
+    pattern = ["herdr", "agent", ["prompt", "get"]],
+    decision = "allow",
+    justification = "{{SHORT}} route to the Orchestrator's bound gru- name only (entry rule); herdr does not scope targets.",
+    match = [
+        ["herdr", "agent", "get", "gru-example"],
+        ["herdr", "agent", "prompt", "gru-example", "text"],
+    ],
+    not_match = [
+        ["herdr", "agent", "list"],
+        ["herdr", "agent", "send-keys", "w1:p1", "Enter"],
+        ["herdr", "pane", "send-keys", "w1:p1", "Enter"],
+        ["herdr", "pane", "run", "w1:p1", "x"],
+        ["herdr", "--remote", "host", "agent", "get", "gru-example"],
+        ["herdr", "--session", "s", "agent", "prompt", "gru-example", "text"],
+        ["herdr"],
+    ],
+)

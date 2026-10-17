@@ -1,0 +1,66 @@
+version: 0.4.2
+summary: >-
+  The Orchestrator onboarding pack (orchestrator.md): a project's opt-in to Gru-Maestro's Orchestrator is
+  one reviewed opt-in PR rendered by `orch-render`, the Owner's install, ACL and relaunch steps (F, G, H),
+  the witness rows, then binding and ACTIVATE by the Orchestrator.
+steps:
+  - id: ORCH-OPTIN
+    title: the opt-in PR commits the pack rendered by orch-render, independently reviewed at an exact SHA
+    actor: agent
+    applies: all
+    check: {kind: manual}
+  - id: ORCH-GUARD
+    title: the reviewed settings.json, which runs the outside-root guard, is installed (Owner step F)
+    actor: owner
+    applies: claude
+    check: {kind: contains, path: .claude/settings.json, text: outside-root-guard.mjs}
+  - id: ORCH-GUARD-FILE
+    title: the reviewed outside-root guard is installed in .claude/hooks (Owner step F)
+    actor: owner
+    applies: claude
+    check: {kind: exists, path: .claude/hooks/outside-root-guard.mjs}
+  - id: ORCH-RULES
+    title: the reviewed Orchestrator rules file is installed in .codex/rules (Owner step F)
+    actor: owner
+    applies: codex
+    check: {kind: manual}
+  - id: ORCH-TRUST
+    title: the project root is trusted in Codex, so its .codex/rules load (Owner step H)
+    actor: owner
+    applies: codex
+    check: {kind: manual}
+  - id: ORCH-LAUNCH
+    title: Codex relaunched with the reviewed codex-launch.ps1, setup refresh clean (Owner step H)
+    actor: owner
+    applies: codex
+    check: {kind: manual}
+  - id: ORCH-ACL
+    title: owner-acl.ps1 applied non-elevated after the first clean sandbox refresh; -Check passes (Owner step G)
+    actor: owner
+    applies: codex
+    check: {kind: manual}
+  - id: ORCH-WITNESS
+    title: the witness rows of the rendered witness-rows.md are recorded on the coordination issue
+    actor: agent
+    applies: all
+    check: {kind: manual}
+  - id: ORCH-ACTIVATE
+    title: the Orchestrator binds the sessions and sends ACTIVATE (Owner pre-authorization, minion-agent#231)
+    actor: agent
+    applies: all
+    check: {kind: manual}
+  - id: ORCH-ENTRY
+    title: the root AGENTS.md carries the Orchestrator routing section from the merged opt-in
+    actor: agent
+    applies: codex
+    check: {kind: contains, path: AGENTS.md, text: "## Orchestrator routing (PROC-KIT-ORCH)"}
+  - id: ORCH-ENTRY-CLAUDE
+    title: the root CLAUDE.md carries the Orchestrator routing section from the merged opt-in
+    actor: agent
+    applies: claude
+    check: {kind: contains, path: CLAUDE.md, text: "## Orchestrator routing (PROC-KIT-ORCH)"}
+  - id: PROFILE-PIN
+    title: the profile's kit.version is raised to 0.4.2 through the project's own review
+    actor: agent
+    applies: all
+    check: {kind: manual}

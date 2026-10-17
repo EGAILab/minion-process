@@ -2,6 +2,33 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
+## 0.4.2 - Orchestrator onboarding pack (unreleased)
+
+Normative kit change, ordered by the Owner on 2026-10-17 (`EGAILab/minion-agent#231`
+issuecomment-6228553990): the full Orchestrator-managed workflow, and every Minion project onboarded.
+
+- `orchestrator.md`:
+  - OR-1, who does what: the Orchestrator owns all job management, and Process-CC maintains the
+    workflow;
+  - OR-2, the implementer merges after an independent exact-SHA APPROVE;
+  - OR-3, review depth: one round, blocking findings only, plus one re-review;
+  - OR-4, GitHub access;
+  - OR-5, the onboarding pack and order, with M-Remote's lessons;
+  - OR-6, unchanged invariants.
+- Pointers to it in `routing.md`, `roles/README.md`, `WORKFLOW.md` §11.6 and §11.7, and
+  `onboarding.md`.
+- `minion_process/bootstrap/orchestrator/`, shipped as package data, forced LF (`.gitattributes`):
+  - templates made from M-Remote's reviewed files (`minion-remote-docs` `4be18ceb`): the Claude
+    outside-root guard and its offline witness, `settings.json`, and the Codex Orchestrator rules;
+  - new: `codex-launch.ps1`, the entry routing section, the witness rows W0 to W14,
+    `owner-acl.ps1` (with `-Check`) and `values.m-remote.yaml`.
+- `minion-process orch-render --root R --values V --out D`: renders the pack into a new folder inside
+  the root. Every placeholder is checked, and nothing is overwritten.
+- `kit-onboard` skill: Owner steps F (install), G (`owner-acl.ps1`) and H (Codex trust, app-server stop,
+  relaunch), mapped from the new manifest steps.
+- `minion_process/releases/0.4.2.yaml`: `ORCH-*` steps and the profile pin.
+- Release: package and shipped profile versions raised to 0.4.2.
+
 ## 0.4.1 - 0.3.2 carried forward (unreleased)
 
 Governing (CP-3) kit change: the 0.3.2 closure route (`EGAILab/minion-process#12`, released from
