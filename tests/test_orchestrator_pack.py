@@ -358,3 +358,41 @@ function Get-Acl { param($LiteralPath) [pscustomobject]@{ Access = @($ace) } }
     )
     result = run_ps(tmp_path, code, PACK / "owner-acl.ps1", tmp_path, propagation, inherit)
     assert result["accepted"] is accepted, result
+
+
+def test_manifest_0_4_3_adds_the_session_and_route_steps() -> None:
+    steps = {s["id"]: s for s in onboard.load_manifest("0.4.3")["steps"]}
+    assert set(steps) == {"ORCH-SESSION-ID", "ORCH-ONE-ROUTE", "PROFILE-PIN"}
+    assert "0.4.3" in steps["PROFILE-PIN"]["title"]
+    assert onboard.between("0.4.2", "0.4.3") == ["0.4.3"]
+
+
+def test_witness_rows_carry_w15_and_w16_with_project_values() -> None:
+    rows = orchestrator.render_all(m_remote())["witness-rows.md"]
+    assert "(kit 0.4.3, orchestrator.md)" in rows
+    w15 = next(line for line in rows.splitlines() if line.startswith("| W15 |"))
+    w16 = next(line for line in rows.splitlines() if line.startswith("| W16 |"))
+    assert "Session identity (OR-10)" in w15 and m_remote()["root"] in w15
+    assert "One route (OR-11)" in w16 and "`m-remote.rules`" in w16
+    assert "with the W15 identities" in rows
+    # KIT-043-R001: W16 is a project-level row that classifies routes by action and target. It keeps the
+    # required routing text and the Orchestrator ingress, and an empty search is not a pass.
+    assert "every project, whatever its tools" in w16
+    assert "W15 and W16 are never skipped" in rows
+    assert "`herdr agent prompt gru-orchestrator`" in w16
+    assert "routing section in the root `AGENTS.md` and `CLAUDE.md`" in w16
+    assert "split arguments, a variable or a wrapper count the same" in w16
+    assert "classified (a)" in w16 and "classified (c)" in w16
+    assert "An empty search on its own is not a pass." in w16
+    assert "stays unbound until it is resolved" in w15
+
+
+def test_orchestrator_md_states_the_0_4_3_rules() -> None:
+    text = (KIT / "orchestrator.md").read_text(encoding="utf-8")
+    for heading in ("## OR-10. Session identity (0.4.3)", "## OR-11. One route between agents (0.4.3)"):
+        assert heading in text
+    assert "over 500 characters as a pointer" in text
+    assert "herdr pane report-agent-session" in text
+    assert "--session-start-source resume" in text and "herdr agent rename <pane>" in text
+    assert "The one direct route." in text and "This is `gru`'s ingress, and it stays." in text
+    assert "W0 to W16" in text and "W0 to W14" not in text

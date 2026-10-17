@@ -1,10 +1,10 @@
-# {{PROJECT}}: Orchestrator opt-in witness rows (kit 0.4.2, orchestrator.md)
+# {{PROJECT}}: Orchestrator opt-in witness rows (kit 0.4.3, orchestrator.md)
 
 Run after Owner steps F, G and H, before binding and ACTIVATE. Record every row on `{{ISSUE}}`, with the
 opt-in commit SHA and the installed files' sha256. Probe files have unique names (`probe-<timestamp>`)
 and are removed afterwards. A Codex row counts only from a sandboxed command with no escalation. The
 Owner declines every escalation prompt during these rows. A command run by approved escalation is not a
-witness. Skip the rows of a tool the project does not use.
+witness. Skip the rows of a tool the project does not use; W15 and W16 are never skipped.
 
 | # | Row | Who | Pass when |
 |---|---|---|---|
@@ -23,11 +23,14 @@ witness. Skip the rows of a tool the project does not use.
 | W12 | Launch PATH | Codex | no entry of the session's `PATH` lies inside `{{ROOT}}`. |
 | W13 | Git | Codex | sandboxed `git rev-parse HEAD` succeeds in every project repository, without `-c safe.directory`. |
 | W14 | Reads outside the root (C10) | Codex | a read of a sibling workspace's file is refused. If it succeeds, record it as a gap; it is a known Codex sandbox limit. |
+| W15 | Session identity (OR-10) | Orchestrator | for every session to be bound, the session id that `herdr agent get` reports matches the tool's own record: for Codex, the rollout file whose first `cwd` is `{{ROOT}}`; for Claude, the transcript under `~/.claude/projects`. In both, the latest turns are the ones on the pane's screen. Record each id with its file path. A wrong or missing id is corrected as OR-10 says, then this row is run again. If the record is ambiguous (two candidate files for one root, or a tool home other than the default), the session stays unbound until it is resolved. |
+| W16 | One route (OR-11) | Orchestrator, with the project's agent; every project, whatever its tools | **1. Inventory.** Search `{{ROOT}}` (excluding `.tmp`) for the word `herdr` and for `HERDR_`, in any case, and list the project's executable entry points: scripts, hooks, skills, tool configs and launch files. **2. Classify** every hit and entry point by what it does when run, not by where it lives: (a) *instruction text* that is never executed, such as the routing section in the root `AGENTS.md` and `CLAUDE.md` and the pack's own files; (b) *the authorized ingress*: `herdr agent prompt {{ORCHESTRATOR}}` and `herdr agent get {{ORCHESTRATOR}}`, as entry rule 1 and `{{RULES_FILE}}` allow; (c) *a forbidden route*: anything that sends a prompt, text or keys to another target, or any `send-keys`, `send-text`, `pane run` or `attach`, however the command is assembled (split arguments, a variable or a wrapper count the same). **3. Controls.** The same search, run over `.tmp\w16`, finds two synthetic files written there and deleted afterwards: one with the routing section's prompt line, classified (a); and a wrapper that builds a herdr prompt to a peer from separate arguments, classified (c). **Pass when** the inventory, its classification and both controls are posted, no (c) remains (each is retired in the opt-in PR), and the opt-in's independent reviewer confirms the classification. An empty search on its own is not a pass. |
 
 **After the rows.** When every row passes, or each gap is recorded and is one the kit states as known
-(W14), the Orchestrator binds the project's sessions and sends `ACTIVATE {{SHORT}}`. The Owner
-pre-authorized this at `EGAILab/minion-agent#231` issuecomment-6228553990. The root entry files,
-including the routing section, are then installed from the merged opt-in.
+(W14), the Orchestrator binds the project's sessions with the W15 identities and sends
+`ACTIVATE {{SHORT}}`. The Owner pre-authorized this at `EGAILab/minion-agent#231`
+issuecomment-6228553990. The root entry files, including the routing section, are then installed from
+the merged opt-in.
 
 **Recheck later.** Run W9 (`-Check`) again after any Codex update or sandbox setup refresh. On
 2026-10-17 a refresh dropped the root's `(D,DC)` deny. Run W8 again if `-Check` reports a sandbox grant

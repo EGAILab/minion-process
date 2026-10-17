@@ -2,6 +2,45 @@
 
 All notable changes to the kit. A consuming project pins one version in its `profile.yaml`.
 
+## 0.4.3 - Lessons from the first days of operation (unreleased)
+
+Normative kit change by the kit owner under the role split (`EGAILab/minion-agent#231`
+issuecomment-6228553990): process feedback from operating M-Remote and the gru registry on 2026-10-17 and
+2026-10-18.
+
+- `orchestrator.md`:
+  - OR-5: `gru` sends any Codex message over 500 characters as a pointer, down from 900. In the
+    journal, every direct prompt up to 608 characters was submitted (17 of 17). Above that, 8 of 20 were not
+    confirmed (UNKNOWN), the shortest at 634. Every pointer was submitted (7 of 7);
+  - OR-7: when a window needs the Owner present, the Owner gives a start time. The window opens only
+    after the app is on screen and the Owner has confirmed they are there; otherwise the run ends cleanly
+    (D5 attempts 2 and 3);
+  - OR-8, how to ask the Owner:
+    - name herdr spaces and tabs, not pane ids, and give the exact action;
+    - never ask the Owner to carry text to an agent bound in `gru`;
+    - dim suggestion text is not an answer;
+    - a wait on the Owner has a 30-minute deadline;
+  - OR-10, session identity: before binding, check the session id against the tool's own session record.
+    `herdr pane report-agent-session` corrects herdr's record without a restart. This comes from the
+    2026-10-17 misbind, where herdr gave Review-Codex's session to the Rust-Codex pane;
+  - OR-11, one route between agents: from ACTIVATE on, every message between agents goes through `gru`,
+    and a project's own scripts that prompt or send keys to another pane are retired.
+- Witness rows W15 (session identity) and W16 (one route).
+- Review 1 fix, KIT-043-R001:
+  - W16 is a project-level row and is never skipped;
+  - it inventories every `herdr` and `HERDR_` hit and every executable entry point, and classifies each
+    by what it does when run: instruction text, the authorized Orchestrator ingress, or a forbidden
+    route, however the command is assembled;
+  - it has two synthetic controls, and an empty search is not a pass;
+  - OR-11 names the ingress and keeps the required routing text.
+- OR-10 additions:
+  - `--session-start-source resume`, which herdr needs to accept a report;
+  - a rename after the correction, because an accepted report clears the pane's name;
+  - an ambiguous record stays unbound;
+  - a report that keeps coming back calls for an Owner relaunch of the reporting session.
+- `minion_process/releases/0.4.3.yaml`: `ORCH-SESSION-ID`, `ORCH-ONE-ROUTE` and the profile pin.
+- Release: package and shipped profile versions raised to 0.4.3.
+
 ## 0.4.2 - Orchestrator onboarding pack (unreleased)
 
 Normative kit change, ordered by the Owner on 2026-10-17 (`EGAILab/minion-agent#231`

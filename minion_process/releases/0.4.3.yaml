@@ -1,0 +1,21 @@
+version: 0.4.3
+summary: >-
+  Lessons from the first two days of Orchestrator operation (orchestrator.md): Owner presence in a
+  consent window (OR-7), how to ask the Owner (OR-8), session identity before binding (OR-10), one route
+  between agents (OR-11), and a Codex pointer threshold of 500 characters (OR-5).
+steps:
+  - id: ORCH-SESSION-ID
+    title: the Orchestrator records witness row W15, each session id checked against the tool's own session record (OR-10)
+    actor: agent
+    applies: all
+    check: {kind: manual}
+  - id: ORCH-ONE-ROUTE
+    title: witness row W16 is recorded, and no project script prompts or sends keys to another agent's pane (OR-11)
+    actor: agent
+    applies: all
+    check: {kind: manual}
+  - id: PROFILE-PIN
+    title: the profile's kit.version is raised to 0.4.3 through the project's own review
+    actor: agent
+    applies: all
+    check: {kind: manual}
