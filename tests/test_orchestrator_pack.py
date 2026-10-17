@@ -135,6 +135,11 @@ def test_another_project_renders_with_no_m_remote_string_left() -> None:
         ("orchestrator", "orchestrator"),
         ("rules_file", "../x.rules"),
         ("issue", "minion-remote#1"),
+        ("short", "M{Remote}"),  # braces: plain text only
+        ("short", 7),  # not text at all
+        ("slug", "M_Remote"),
+        ("repos", []),
+        ("repos", "minion-remote"),
     ],
 )
 def test_bad_values_are_refused(key: str, value: object) -> None:
@@ -219,6 +224,11 @@ def test_orch_render_writes_only_a_new_folder_inside_the_root(tmp_path: Path) ->
         assert run("docs/values.yaml", *bad) == 1
     assert not (tmp_path / "escape").exists() and not (tmp_path / "abs").exists()
     assert run("../v.yaml", "--out", "docs/p2") == 1
+    # A missing or unparseable values file is refused before anything is written.
+    (root / "docs" / "broken.yaml").write_text("root: [unclosed", "utf-8")
+    assert run("docs/broken.yaml", "--out", "docs/p3") == 1
+    assert run("docs/absent.yaml", "--out", "docs/p4") == 1
+    assert not (root / "docs" / "p3").exists() and not (root / "docs" / "p4").exists()
 
 
 def test_manifest_0_4_2_and_its_owner_steps_have_runbook_letters() -> None:
