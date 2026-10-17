@@ -1,4 +1,4 @@
-# {{PROJECT}}: Orchestrator opt-in witness rows (kit 0.4.2, orchestrator.md)
+# {{PROJECT}}: Orchestrator opt-in witness rows (kit 0.4.3, orchestrator.md)
 
 Run after Owner steps F, G and H, before binding and ACTIVATE. Record every row on `{{ISSUE}}`, with the
 opt-in commit SHA and the installed files' sha256. Probe files have unique names (`probe-<timestamp>`)
@@ -23,11 +23,14 @@ witness. Skip the rows of a tool the project does not use.
 | W12 | Launch PATH | Codex | no entry of the session's `PATH` lies inside `{{ROOT}}`. |
 | W13 | Git | Codex | sandboxed `git rev-parse HEAD` succeeds in every project repository, without `-c safe.directory`. |
 | W14 | Reads outside the root (C10) | Codex | a read of a sibling workspace's file is refused. If it succeeds, record it as a gap; it is a known Codex sandbox limit. |
+| W15 | Session identity (OR-10) | Orchestrator | for every session to be bound, the session id that `herdr agent get` reports matches the tool's own record: for Codex, the rollout file whose first `cwd` is `{{ROOT}}`; for Claude, the transcript under `~/.claude/projects`. In both, the latest turns are the ones on the pane's screen. Record each id with its file path. A wrong or missing id is corrected as OR-10 says, then this row is run again. |
+| W16 | One route (OR-11) | Claude | a search of `{{ROOT}}`, excluding `.tmp`, for `herdr agent prompt`, `herdr agent send-keys` and `herdr pane send` finds them only in the rendered pack (`{{RULES_FILE}}`, `witness-rows.md` and `entry-routing.md`). Post the search and its output. Each other hit is retired in the opt-in PR before this row passes. |
 
 **After the rows.** When every row passes, or each gap is recorded and is one the kit states as known
-(W14), the Orchestrator binds the project's sessions and sends `ACTIVATE {{SHORT}}`. The Owner
-pre-authorized this at `EGAILab/minion-agent#231` issuecomment-6228553990. The root entry files,
-including the routing section, are then installed from the merged opt-in.
+(W14), the Orchestrator binds the project's sessions with the W15 identities and sends
+`ACTIVATE {{SHORT}}`. The Owner pre-authorized this at `EGAILab/minion-agent#231`
+issuecomment-6228553990. The root entry files, including the routing section, are then installed from
+the merged opt-in.
 
 **Recheck later.** Run W9 (`-Check`) again after any Codex update or sandbox setup refresh. On
 2026-10-17 a refresh dropped the root's `(D,DC)` deny. Run W8 again if `-Check` reports a sandbox grant

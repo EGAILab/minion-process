@@ -6,6 +6,10 @@
 - issuecomment-6227470172: the standing GitHub-check disposition, carried to the job owner in OR-4.
 - issuecomment-6228683601: Orchestrator autonomy and standing consent for windows (OR-7, OR-8).
 
+Kit 0.4.3 adds the lessons of the first two days of operation (2026-10-17 and 2026-10-18): Owner
+presence in a window (OR-7), how to ask the Owner (OR-8), session identity (OR-10), one route between
+agents (OR-11), and a lower Codex pointer threshold (OR-5).
+
 The contract is PROC-KIT-ORCH proposal revision 5 (issuecomment-6178363194). The first project on this
 route was M-Remote, activated on 2026-10-17. Its reviewed and installed files are the base of the pack
 below.
@@ -62,7 +66,7 @@ worked example. Rendering it gives back M-Remote's reviewed files byte for byte.
 | `<rules_file>` | `.codex/rules/<rules_file>` | Codex: allows exactly `herdr agent prompt` and `herdr agent get`, bare `herdr` only |
 | `codex-launch.ps1` | run by the Owner | Codex: PS-3 temp and caches, git `safe.directory` in command scope, the PS-5 sandbox line, the computer-use plugin off |
 | `entry-routing.md` | appended to the root `AGENTS.md` and `CLAUDE.md` | the routing rules in force from ACTIVATE |
-| `witness-rows.md` | not installed | the rows W0 to W14 and their pass criteria |
+| `witness-rows.md` | not installed | the rows W0 to W16 and their pass criteria |
 
 `owner-acl.ps1` is not rendered. The Owner runs it with `-Root`.
 
@@ -75,9 +79,10 @@ worked example. Rendering it gives back M-Remote's reviewed files byte for byte.
    - H: trust the root in Codex, stop the Codex desktop app and app-server once per host, and relaunch
      each session (Codex with `codex-launch.ps1`);
    - G: after the relaunched Codex session's first sandboxed command, run `owner-acl.ps1`.
-3. **Witness rows.** The project's agents run W0 to W14 and record them on the coordination issue.
+3. **Witness rows.** The project's agents run W0 to W16 and record them on the coordination issue. The
+   Orchestrator records W15 (session identity, OR-10).
 4. **Activation.** Binding and ACTIVATE are **pre-authorized by the Owner** once the rows pass. The
-   Orchestrator binds the sessions (`agent rename`, registry, `registry-check`) and sends
+   Orchestrator binds the sessions with the identities checked in W15 (`agent rename`, registry, `registry-check`) and sends
    `ACTIVATE <project>`. The root entry files are then installed from the merged opt-in.
 
 **Order (Owner):**
@@ -99,8 +104,15 @@ worked example. Rendering it gives back M-Remote's reviewed files byte for byte.
 - Removing an inherited sandbox grant from a large tree with `icacls /remove:g` rewrites every file
   below it: it took about 49 minutes on `Minions`. `owner-acl.ps1` reports a parent grant and leaves
   the choice to the Owner.
-- `gru` delivers a Codex message over 900 characters as a pointer to a brief file. A pasted long text
-  sat unsubmitted in the Codex input box, twice.
+- A pasted text left in the Codex input box is not submitted. Kit 0.4.2 set `gru`'s pointer threshold at
+  900 characters, but the journal up to 2026-10-18 shows shorter texts failing too:
+  - every direct Codex prompt up to 608 characters was submitted (17 of 17);
+  - above that, 8 of 20 ended UNKNOWN, the shortest at 634 characters. Those the Orchestrator looked at
+    were left unsubmitted in the input box;
+  - every pointer prompt (about 330 characters) was submitted (7 of 7).
+
+  So **`gru` delivers any Codex message over 500 characters as a pointer** to a brief file (OR-9). The
+  Orchestrator implements this in `gru`.
 
 ## OR-6. Unchanged
 
@@ -127,6 +139,17 @@ issuecomment-6228683601). That decision replaces a per-window proposal.
 - **Stopping.** The Owner can stop a window at any time.
 - **Outside the contract.** A window outside the project's contract is a change outside the approved
   plan, and OR-8 escalates it.
+- **Owner presence (0.4.3).** Some windows need the Owner at the display or device, for example to pair,
+  tap or type a PIN. The Owner's presence is then a physical Owner action (OR-8 item 1):
+  - The Orchestrator asks once, in its batched request, for a start time.
+  - It schedules preparation, such as builds and host slots, so that the window opens at that time.
+  - Before the window opens, it checks that the app is on screen and that the Owner has confirmed they
+    are present. Only then is the window's start recorded.
+  - If that confirmation has not come by the start time, the window does not open. The run ends cleanly
+    and waits for a new time from the Owner.
+
+  M-Remote's D5 showed both failures. Attempt 2 ended without pairing because the app was not on screen
+  when the window opened. Attempt 3 was closed because the Owner was not there.
 
 ## OR-8. Orchestrator autonomy
 
@@ -154,10 +177,25 @@ It escalates to the Owner only for:
    - new projects or roles not in issuecomment-6228553990.
 3. **Anything the rules reserve for an Owner-typed code.**
 
+**How to ask the Owner (0.4.3):**
+- **Name things as the Owner sees them.** The Owner sees herdr's space and tab names, not pane ids. Write
+  "space Gru-Maestro, tab Review-Codex", not `w9:p4`.
+- **Say exactly what to do.** For example: "quit Codex, then run `codex resume` in the same tab and pick
+  the latest session". Do not just write "restart".
+- **Never ask the Owner to carry text between agents.** A message to an agent bound in `gru` goes through
+  `gru`. If `gru` cannot deliver it, record that as a `gru` defect and ask the Owner to relay it only
+  after that.
+- **Only a submitted message is an answer.** Dim text in an agent's own input box (`ESC[2m`) is a
+  suggestion from that agent's interface. It is neither the Owner's input nor a draft.
+- **A wait on the Owner has a deadline.** If no answer arrives within 30 minutes, send one reminder, and
+  record the job as paused while it waits on the Owner. On 2026-10-17 the Orchestrator waited about
+  1 h 40 min on an Owner paste that a `gru` delivery could have replaced.
+
 ## OR-9. Brief-file read exception
 
-`gru` delivers a Codex message over 900 characters as a pointer to one brief file under
-`Gru-Maestro\.tmp\briefs\`, with its sha256 (`gru` candidate 2). The entry routing section (rules 3,
+`gru` delivers a long Codex message as a pointer to one brief file under `Gru-Maestro\.tmp\briefs\`,
+with its sha256 (`gru` candidate 2). "Long" means over 900 characters in kit 0.4.2 and over 500 from
+kit 0.4.3 (OR-5). The entry routing section (rules 3,
 5 and 8) makes one **deliberate, read-only exception** to cross-workspace containment for it:
 - a consumer may read exactly the one file the pointer names, directly in that folder;
 - it checks the file's sha256 against the pointer before acting;
@@ -174,3 +212,41 @@ It escalates to the Owner only for:
 
 This resolves GRU19 (minion-remote-docs#1 issuecomment-6228701760). There, a brief outside M-Remote's
 containment had to be published on the issue instead.
+
+## OR-10. Session identity (0.4.3)
+
+A `gru` binding pairs a herdr name with an agent session, and `gru` refuses to deliver when herdr
+reports a different session. That check holds only if the recorded session really belongs to the pane.
+On 2026-10-17 herdr reported Review-Codex's Codex session for the Minion-Agent Rust-Codex pane, and the
+registry copied it. The check then agreed with itself, and the real Review-Codex session could not be
+bound.
+
+**Before the Orchestrator binds a session, and whenever herdr's session for a bound pane changes,** it
+confirms the ID against the tool's own session record:
+- **Codex:** the rollout file `~/.codex/sessions/YYYY/MM/DD/rollout-*-<id>.jsonl` exists, its first
+  `cwd` is the pane's root, and its latest turns are the turns on the pane's screen.
+- **Claude:** the transcript `~/.claude/projects/<root slug>/<id>.jsonl` exists, and its latest turns are
+  the turns on the pane's screen.
+
+**When herdr reports a wrong session or none**, the Orchestrator corrects herdr's record. This needs no
+restart and no keypress to any agent:
+
+```
+herdr pane report-agent-session <pane> --source herdr:<tool> --agent <tool> --seq <now in ms> --agent-session-id <id>
+```
+
+- It runs this one command outside `gru`'s allow-list, under OR-8, and records the evidence first.
+- It checks the result with `herdr agent get`. herdr can ignore a report: on 2026-10-17 the first one
+  for Rust-Codex was ignored, and a retry with a later `--seq` was accepted.
+- If herdr still refuses, the fallback is an Owner restart of that tab: quit, then `codex resume <id>`
+  or `claude --resume <id>`.
+
+## OR-11. One route between agents (0.4.3)
+
+From ACTIVATE on, every message between agents goes through `gru`.
+- **Retiring old routes.** A project's own scripts that prompt another agent's pane or send it keys are
+  retired in the project's opt-in PR. For example, Minion-Agent's #209 holder uses its own herdr script
+  to reach the Orchestrator, and that script presses Enter in the Orchestrator's pane.
+- **Before ACTIVATE.** Until a project is activated, its own rules apply. Even then, no script sends
+  keys to a pane that is blocked or shows a dialog (OR-6).
+- **Witness.** W16 records that no such script remains.
