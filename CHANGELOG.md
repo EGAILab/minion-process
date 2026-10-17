@@ -26,6 +26,18 @@ issuecomment-6228553990): process feedback from operating M-Remote and the gru r
   - OR-11, one route between agents: from ACTIVATE on, every message between agents goes through `gru`,
     and a project's own scripts that prompt or send keys to another pane are retired.
 - Witness rows W15 (session identity) and W16 (one route).
+- Review 1 fix, KIT-043-R001:
+  - W16 is a project-level row and is never skipped;
+  - it inventories every `herdr` and `HERDR_` hit and every executable entry point, and classifies each
+    by what it does when run: instruction text, the authorized Orchestrator ingress, or a forbidden
+    route, however the command is assembled;
+  - it has two synthetic controls, and an empty search is not a pass;
+  - OR-11 names the ingress and keeps the required routing text.
+- OR-10 additions:
+  - `--session-start-source resume`, which herdr needs to accept a report;
+  - a rename after the correction, because an accepted report clears the pane's name;
+  - an ambiguous record stays unbound;
+  - a report that keeps coming back calls for an Owner relaunch of the reporting session.
 - `minion_process/releases/0.4.3.yaml`: `ORCH-SESSION-ID`, `ORCH-ONE-ROUTE` and the profile pin.
 - Release: package and shipped profile versions raised to 0.4.3.
 

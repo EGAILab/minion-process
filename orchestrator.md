@@ -232,21 +232,37 @@ confirms the ID against the tool's own session record:
 restart and no keypress to any agent:
 
 ```
-herdr pane report-agent-session <pane> --source herdr:<tool> --agent <tool> --seq <now in ms> --agent-session-id <id>
+herdr pane report-agent-session <pane> --source herdr:<tool> --agent <tool> --seq <now in ms> --agent-session-id <id> --session-start-source resume
+herdr agent rename <pane> <its gru- name>
 ```
 
-- It runs this one command outside `gru`'s allow-list, under OR-8, and records the evidence first.
-- It checks the result with `herdr agent get`. herdr can ignore a report: on 2026-10-17 the first one
-  for Rust-Codex was ignored, and a retry with a later `--seq` was accepted.
+- It runs these two commands outside `gru`'s allow-list, under OR-8, and records the evidence first.
+- herdr ignored the report without `--session-start-source` twice on 2026-10-17 and 2026-10-18, and
+  accepted it with that option.
+- An accepted report clears the pane's herdr name, so the rename follows. Then `herdr agent get` must
+  show the right session and name, and `registry-check` must show the entry BOUND.
 - If herdr still refuses, the fallback is an Owner restart of that tab: quit, then `codex resume <id>`
   or `claude --resume <id>`.
+- If the record is ambiguous, the session stays unbound until it is resolved. Ambiguous means two
+  candidate files for one root, or a tool home other than the default.
+- **A report that keeps coming back** means another process is reporting for that pane. On 2026-10-18
+  herdr again showed Review-Codex's session for Rust-Codex while Review-Codex was working. The likely
+  cause is a session started with another pane's `HERDR_PANE_ID` in its environment. The remedy is an
+  Owner relaunch of the reporting session from a fresh shell in its own tab, not repeated corrections.
 
 ## OR-11. One route between agents (0.4.3)
 
 From ACTIVATE on, every message between agents goes through `gru`.
-- **Retiring old routes.** A project's own scripts that prompt another agent's pane or send it keys are
-  retired in the project's opt-in PR. For example, Minion-Agent's #209 holder uses its own herdr script
-  to reach the Orchestrator, and that script presses Enter in the Orchestrator's pane.
+- **The one direct route.** A project agent reaches the Orchestrator with `herdr agent prompt` or
+  `herdr agent get` on the Orchestrator's bound `gru-` name, as entry rule 1 and the Codex rules file
+  allow. This is `gru`'s ingress, and it stays.
+- **Retiring old routes.** Anything else that sends a prompt, text or keys to another agent's pane is
+  retired in the project's opt-in PR. That covers any target other than the Orchestrator, and any
+  `send-keys`, `send-text`, `pane run` or `attach`. For example, Minion-Agent's #209 holder reaches the
+  Orchestrator with its own herdr script, and that script also presses Enter in the Orchestrator's pane.
+- **What counts.** A route is judged by what the code does when run, not by where the text sits or how
+  the command is spelled. The routing section in `AGENTS.md` and `CLAUDE.md` is instruction text and is
+  required. A wrapper that builds the same command from separate arguments or a variable is a route.
 - **Before ACTIVATE.** Until a project is activated, its own rules apply. Even then, no script sends
   keys to a pane that is blocked or shows a dialog (OR-6).
-- **Witness.** W16 records that no such script remains.
+- **Witness.** W16 records the inventory and classification for every project, whatever its tools.

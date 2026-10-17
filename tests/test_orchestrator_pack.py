@@ -375,6 +375,16 @@ def test_witness_rows_carry_w15_and_w16_with_project_values() -> None:
     assert "Session identity (OR-10)" in w15 and m_remote()["root"] in w15
     assert "One route (OR-11)" in w16 and "`m-remote.rules`" in w16
     assert "with the W15 identities" in rows
+    # KIT-043-R001: W16 is a project-level row that classifies routes by action and target. It keeps the
+    # required routing text and the Orchestrator ingress, and an empty search is not a pass.
+    assert "every project, whatever its tools" in w16
+    assert "W15 and W16 are never skipped" in rows
+    assert "`herdr agent prompt gru-orchestrator`" in w16
+    assert "routing section in the root `AGENTS.md` and `CLAUDE.md`" in w16
+    assert "split arguments, a variable or a wrapper count the same" in w16
+    assert "classified (a)" in w16 and "classified (c)" in w16
+    assert "An empty search on its own is not a pass." in w16
+    assert "stays unbound until it is resolved" in w15
 
 
 def test_orchestrator_md_states_the_0_4_3_rules() -> None:
@@ -383,4 +393,6 @@ def test_orchestrator_md_states_the_0_4_3_rules() -> None:
         assert heading in text
     assert "over 500 characters as a pointer" in text
     assert "herdr pane report-agent-session" in text
+    assert "--session-start-source resume" in text and "herdr agent rename <pane>" in text
+    assert "The one direct route." in text and "This is `gru`'s ingress, and it stays." in text
     assert "W0 to W16" in text and "W0 to W14" not in text
