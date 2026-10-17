@@ -43,8 +43,9 @@ this kit's own route: an independent review, then an exact-SHA merge by the kit 
   posts them on the job's coordination issue or PR. Process-CC does not do this. The worker cites the
   post in place of its own lookup. It still stops if what it sees locally contradicts the posted facts.
   This carries the Owner's standing disposition (issuecomment-6227470172) over to the job owner.
-- **The worker's own access** is an Owner-issued token in its launch environment. Its scope is the
-  Owner's decision, including whether it covers merges under OR-2.
+- **The worker's own access** is an Owner-issued, fine-grained token in its launch environment: one
+  token per project, scoped to that project's repositories only, with Contents and Pull requests
+  read/write, so its implementer can verify and merge under OR-2 (Owner, issuecomment-6228674156).
 
 ## OR-5. Onboarding a project (kit 0.4.2 pack)
 
