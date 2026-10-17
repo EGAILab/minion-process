@@ -40,9 +40,25 @@ GRU_NAME = re.compile(r"^gru-[a-z0-9-]{1,40}$")
 RULES_FILE = re.compile(r"^[a-z][a-z0-9-]{0,39}\.rules$")
 ISSUE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$")
 TEXT = re.compile(r"^[^\r\n{}\"`\\]{1,120}$")
+# Never in any value: every value is substituted into executable syntax (PowerShell, Codex rules, JSON,
+# JavaScript), and these would let a value become code there (KIT-042-R001).
+UNSAFE = re.compile(r"['\"`$;&|<>\x00-\x1f\x7f]")
 KEYS = {
-    "project", "slug", "short", "claude_sessions", "codex_sessions", "root", "home", "temp",
-    "git_install", "exempt_decision", "read_exec_roots", "repos", "orchestrator", "issue", "rules_file",
+    "project",
+    "slug",
+    "short",
+    "claude_sessions",
+    "codex_sessions",
+    "root",
+    "home",
+    "temp",
+    "git_install",
+    "exempt_decision",
+    "read_exec_roots",
+    "repos",
+    "orchestrator",
+    "issue",
+    "rules_file",
 }
 
 
@@ -66,10 +82,21 @@ def _text(value: Any, where: str) -> str:
     return value
 
 
+def _safe(value: Any, where: str) -> None:
+    """Refuse a value that carries a quote, `$`, a command separator, a redirection or a control character."""
+    items = value if isinstance(value, list) else [value]
+    for i, item in enumerate(items):
+        if isinstance(item, str) and UNSAFE.search(item):
+            at = f"{where}[{i}]" if isinstance(value, list) else where
+            raise PackError(f"{at}: must not contain ' \" ` $ ; & | < > or control characters, got {item!r}")
+
+
 def load_values(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict) or set(data) != KEYS:
         missing, extra = KEYS - set(data or {}), set(data or {}) - KEYS
         raise PackError(f"values: missing {sorted(missing)}, unknown {sorted(extra)}")
+    for key in sorted(KEYS):
+        _safe(data[key], key)
     for key in ("project", "short", "claude_sessions", "codex_sessions", "exempt_decision"):
         _text(data[key], key)
     if not SLUG.fullmatch(str(data["slug"])):
@@ -104,13 +131,22 @@ def _js(path: str) -> str:
     return path.replace("\\", "\\\\")
 
 
+def ps_quote(text: str) -> str:
+    """Inside a PowerShell single-quoted literal: double every apostrophe (defence in depth; `_safe`
+    already refuses apostrophes)."""
+    return text.replace("'", "''")
+
+
 def mapping(v: dict[str, Any]) -> dict[str, str]:
     """Placeholder -> text. Derived forms (JS-escaped, '/'-separated, blocks) come only from here."""
     root_fwd = v["root"].replace("\\", "/")
     safe = [f"{root_fwd}/{repo}" for repo in v["repos"]]
     git_env = [f"$env:GIT_CONFIG_COUNT   = '{len(safe)}'"]
     for i, path in enumerate(safe):
-        git_env += [f"$env:GIT_CONFIG_KEY_{i}   = 'safe.directory'", f"$env:GIT_CONFIG_VALUE_{i} = '{path}'"]
+        git_env += [
+            f"$env:GIT_CONFIG_KEY_{i}   = 'safe.directory'",
+            f"$env:GIT_CONFIG_VALUE_{i} = '{ps_quote(path)}'",
+        ]
     return {
         "PROJECT": v["project"],
         "PROJECT_RE": re.sub(r"([.^$*+?()\[\]{}|/\\])", r"\\\1", v["project"]),
@@ -121,6 +157,7 @@ def mapping(v: dict[str, Any]) -> dict[str, str]:
         "ROOT": v["root"],
         "ROOT_FWD": root_fwd,
         "ROOT_JS": _js(v["root"]),
+        "ROOT_PS": ps_quote(v["root"]),
         "HOME_JS": _js(v["home"]),
         "TEMP_JS": _js(v["temp"]),
         "GIT_INSTALL_JS": _js(v["git_install"]),

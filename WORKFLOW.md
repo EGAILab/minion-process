@@ -689,8 +689,9 @@ downgrades, remote creation, risk acceptance and amending the delegation itself.
 `delegation.routing: false` the coordinator asks as before.
 
 **Orchestrator.** For a project activated on Gru-Maestro's Orchestrator, job management (dispatch,
-hand-offs, closing, drain sequences, onboarding) belongs to the Orchestrator, which asks the Owner
-directly for Owner decisions on a job; the kit owner maintains the workflow (`orchestrator.md` OR-1).
+hand-offs, closing, drain sequences, onboarding) belongs to the Orchestrator. It decides operational
+matters itself and escalates only as `orchestrator.md` OR-8 allows; the kit owner maintains the
+workflow (OR-1).
 
 ### 11.8 Contract convergence protocol
 

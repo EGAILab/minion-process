@@ -8,9 +8,10 @@
 // guard cannot classify is refused (fail closed).
 //
 // Owner-only control files inside the root (kit project-scope PS-2 and PS-7):
-// <root>\.claude itself, <root>\.claude\settings*.json, everything under <root>\.claude\hooks,
-// and Codex's <root>\.codex and <root>\.agents. Tool writes there are refused, so the agent
-// cannot change either agent's hooks, settings or memory location. <root>\.claude\memory
+// <root>\.claude itself, <root>\.claude\settings*.json, everything under <root>\.claude\hooks
+// and <root>\.claude\skills, the kit's <root>\.minion, and Codex's <root>\.codex and <root>\.agents
+// (kit 0.4.2 added skills and .minion). Tool writes there are refused, so the agent cannot change
+// either agent's hooks, skills, settings, kit install or memory location. <root>\.claude\memory
 // stays writable (Owner, 2026-10-16). ~/.claude stays read and execute only.
 //
 // Known limit: Bash and PowerShell commands are parsed, not sandboxed. A command can
@@ -143,7 +144,7 @@ export function isOwnerOnly(p, rootReal) {
   const rel = W.relative(rootReal, p).toLowerCase();
   if (rel === ".claude") return true;
   if (/^\.claude\\settings[^\\]*\.json$/.test(rel)) return true;
-  for (const dir of [".claude\\hooks", ".codex", ".agents"]) {
+  for (const dir of [".claude\\hooks", ".claude\\skills", ".codex", ".agents", ".minion"]) {
     if (rel === dir || rel.startsWith(dir + "\\")) return true;
   }
   return false;

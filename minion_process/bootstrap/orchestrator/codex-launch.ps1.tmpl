@@ -16,7 +16,7 @@ bundled computer-use plugin out of this session.
 #>
 param([string]$Resume)
 $ErrorActionPreference = 'Stop'
-$W = '{{ROOT}}'
+$W = '{{ROOT_PS}}'
 if ((Get-Location).Path -ne $W) { Set-Location -LiteralPath $W }
 if ($Resume -and $Resume -notmatch '^[0-9A-Za-z][0-9A-Za-z-]{7,63}$') { throw "bad session id: $Resume" }
 

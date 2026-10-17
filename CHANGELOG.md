@@ -16,15 +16,30 @@ issuecomment-6228553990): the full Orchestrator-managed workflow, and every Mini
     the token's scope;
   - OR-5, the onboarding pack and order, with M-Remote's lessons;
   - OR-6, unchanged invariants;
-  - OR-7, Owner consent for a job: the Orchestrator decides every parameter from the contract and
-    sends one ready-made proposal, answered yes, not now or a time.
+  - OR-7, consent windows: these run under the Owner's standing consent within the project's
+    contract. The Orchestrator sets the parameters, records the owner-window record, and gives the
+    Owner a heads-up notice, not a question (issuecomment-6228683601);
+  - OR-8, Orchestrator autonomy: it decides operational matters itself and records the basis. It
+    escalates only for physical Owner-only actions (batched), changes outside the approved plan, or
+    Owner-typed codes;
+  - OR-9, the read-only brief-file exception for `gru` pointers, with a sha256 check; this resolves
+    GRU19.
 - One-line pointers to it in `routing.md`, `roles/README.md`, `WORKFLOW.md` §11.6 and §11.7, and
   `onboarding.md`.
 - `minion_process/bootstrap/orchestrator/`, shipped as package data, forced LF (`.gitattributes`):
   - templates made from M-Remote's reviewed files (`minion-remote-docs` `4be18ceb`): the Claude
     outside-root guard and its offline witness, `settings.json`, and the Codex Orchestrator rules;
   - new: `codex-launch.ps1`, the entry routing section, the witness rows W0 to W14,
-    `owner-acl.ps1` (with `-Check`) and `values.m-remote.yaml`.
+    `owner-acl.ps1` (with `-Check`) and `values.m-remote.yaml`;
+  - review 1 fixes (KIT-042-R001 to R006):
+    - every value that reaches executable syntax is refused if it holds a quote, `$`, a command
+      separator, a redirection or a control character, and PowerShell literals are also escaped;
+    - `owner-acl.ps1` refuses a link anywhere in the root's or a target's path, has no
+      outside-root option, and counts only a full-scope deny (propagation None);
+    - the guard also protects `.claude/skills` and `.minion` (W5, O13 to O15). Its bytes therefore
+      differ from M-Remote's installed guard, which M-Remote upgrades when it adopts 0.4.2;
+    - the entry rules carry the brief-file exception (OR-9);
+    - ruff is clean.
 - `minion-process orch-render --root R --values V --out D`: renders the pack into a new folder inside
   the root. Every placeholder is checked, and nothing is overwritten.
 - `kit-onboard` skill: Owner steps F (install), G (`owner-acl.ps1`) and H (Codex trust, app-server stop,

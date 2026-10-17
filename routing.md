@@ -43,12 +43,15 @@ per-work-package metric "Owner questions, split into routing vs semantic vs risk
 ## Orchestrator-managed projects
 
 For a project activated on Gru-Maestro's Orchestrator, `orchestrator.md` adds:
-- the Orchestrator starts, hands off and closes jobs, and asks the Owner directly for Owner decisions
-  on a job (OR-1);
+- the Orchestrator starts, hands off and closes jobs (OR-1), decides operational matters itself and
+  escalates only for physical Owner-only actions, changes outside the approved plan, or Owner codes
+  (OR-8);
 - the implementer merges its own PR after an independent APPROVE at the exact SHA (OR-2);
 - reviews default to one round, blocking findings only, plus one re-review (OR-3);
-- an Owner consent is one ready-made proposal from the Orchestrator, answered yes, not now or a time
-  (OR-7).
+- consent windows run under the Owner's standing consent within the project's contract, with a heads-up
+  notice, not a question (OR-7);
+- a Codex consumer may read only the one brief file a `gru` pointer names, after checking its hash
+  (OR-9).
 
 ## Unchanged
 

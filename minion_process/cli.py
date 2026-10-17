@@ -33,7 +33,6 @@ from .composite import close as composite_close
 from .composite import handoff as composite_handoff
 from .github import CODE_REPO, REPOS, GitHub
 from .launch import LaunchError, observe, plan, record
-from .orchestrator import PackError, render_pack
 from .model import BodyFormatError, candidates, split_body
 from .onboard import ManifestError, markdown, onboard
 from .ops import (
@@ -46,6 +45,7 @@ from .ops import (
     restore_revision,
     verified_comment,
 )
+from .orchestrator import PackError, render_pack
 from .profile import load_profile
 from .review import (
     Selection,

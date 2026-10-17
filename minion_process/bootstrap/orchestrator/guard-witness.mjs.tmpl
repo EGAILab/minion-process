@@ -67,6 +67,9 @@ const rows = [
   ["O10 write Codex .codex/config.toml", call("Write", { file_path: W.join(root, ".codex", "config.toml") }), "deny"],
   ["O11 shell write into .agents", call("Bash", { command: "mkdir -p .agents/skills" }), "deny"],
   ["O12 write .tmp", call("Write", { file_path: W.join(root, ".tmp", "w.txt") }), "allow"],
+  ["O13 write under .claude/skills", call("Write", { file_path: W.join(root, ".claude", "skills", "s", "SKILL.md") }), "deny"],
+  ["O14 write .minion/kit.json", call("Write", { file_path: W.join(root, ".minion", "kit.json") }), "deny"],
+  ["O15 shell copy into .minion", call("Bash", { command: "cp x.json .minion/kit.json" }), "deny"],
   ["O9 write global memory", call("Write", { file_path: W.join(cfg.home, ".claude", "projects", "p", "memory", "m.md") }), "deny"],
 ];
 

@@ -4,6 +4,7 @@
 **Authority:** the Owner's decisions of 2026-10-17 on `EGAILab/minion-agent#231`:
 - issuecomment-6228553990: roles, merges, onboarding and review depth;
 - issuecomment-6227470172: the standing GitHub-check disposition, carried to the job owner in OR-4.
+- issuecomment-6228683601: Orchestrator autonomy and standing consent for windows (OR-7, OR-8).
 
 The contract is PROC-KIT-ORCH proposal revision 5 (issuecomment-6178363194). The first project on this
 route was M-Remote, activated on 2026-10-17. Its reviewed and installed files are the base of the pack
@@ -13,7 +14,7 @@ below.
 
 | Session | Owns | Does not |
 |---|---|---|
-| **Orchestrator-CC** (`gru-orchestrator`, Gru-Maestro) | all daily work and job management: starting jobs from project backlogs, hand-offs between Impl, Review and the host queue, closing jobs, drain sequences, project onboarding with this pack, and implementing each kit version in `gru`. It asks the Owner directly for Owner decisions on a job. | write in a project, merge, grant or release a host slot, send keys or codes |
+| **Orchestrator-CC** (`gru-orchestrator`, Gru-Maestro) | all daily work and job management: starting jobs from project backlogs, hand-offs between Impl, Review and the host queue, closing jobs, drain sequences, project onboarding with this pack, and implementing each kit version in `gru`. It decides operational matters itself and escalates to the Owner only as OR-8 allows. | write in a project, merge, grant or release a host slot, send keys or codes |
 | **Process-CC** (`gru-process-cc`, Minion-Process) | the workflow itself: it takes feedback, improves the process, releases kit versions and hands each one to the Orchestrator to implement | dispatch, drive or merge project work |
 | **A project's agents** | their own work under the project's rules, reached only through the Orchestrator once activated (the entry routing section) | address another agent's pane directly |
 
@@ -113,19 +114,63 @@ This file never weakens:
 
 A project's own rules still decide its gate tiers and evidence standards.
 
-## OR-7. Owner consent for a job
+## OR-7. Consent windows (live desktop, device, capture)
 
-When a job needs the Owner's consent, for example a live desktop window, a device, or a capture, the
-Orchestrator decides every parameter itself from the project's contract and records:
-- duration;
-- display or device;
-- timing;
-- the steps;
-- the evidence limits.
+These windows run under the **Owner's standing consent**, within the project's own contract (Owner,
+issuecomment-6228683601). That decision replaces a per-window proposal.
+- **Parameters.** The Orchestrator sets every parameter itself from the contract: duration, display or
+  device, timing, steps and evidence limits. Where the contract leaves one open, it picks the narrowest
+  value that still meets the job's goal.
+- **Record.** It records the owner-window record, which cites that comment as the authorizer.
+- **Heads-up.** Before the window starts, it gives the Owner a notice, not a question: when, which
+  display, and how long.
+- **Stopping.** The Owner can stop a window at any time.
+- **Outside the contract.** A window outside the project's contract is a change outside the approved
+  plan, and OR-8 escalates it.
 
-It sends the Owner **one ready-made proposal**, which the Owner can answer with **yes**, **not now**,
-or **a time**. It never asks the Owner to choose the limits.
-- **If the contract leaves a parameter open**, the Orchestrator picks the narrowest value that still
-  meets the job's goal, and states it in the proposal.
-- **A "not now" or a time** reschedules the same proposal.
-- **A changed parameter** is a new proposal.
+## OR-8. Orchestrator autonomy
+
+The Orchestrator decides operational matters itself, records each decision with its basis, and does
+not ask the Owner (issuecomment-6228683601). Operational matters include:
+- routing, ordering and scheduling;
+- cancelling and closing jobs; the handover is its standing authority;
+- GitHub fact checks (OR-4);
+- host-slot use;
+- review depth, within OR-3;
+- whether a step is needed;
+- test-window parameters (OR-7).
+
+It escalates to the Owner only for:
+1. **Physical actions only the Owner can do**, batched into one request:
+   - creating tokens;
+   - running elevated or admin scripts;
+   - restarting sessions;
+   - trust or permission prompts;
+   - pressing Enter or Esc in a pane.
+2. **Changes outside the approved plan:**
+   - public visibility;
+   - deleting data or repositories;
+   - spending;
+   - new projects or roles not in issuecomment-6228553990.
+3. **Anything the rules reserve for an Owner-typed code.**
+
+## OR-9. Brief-file read exception
+
+`gru` delivers a Codex message over 900 characters as a pointer to one brief file under
+`Gru-Maestro\.tmp\briefs\`, with its sha256 (`gru` candidate 2). The entry routing section (rules 3,
+5 and 8) makes one **deliberate, read-only exception** to cross-workspace containment for it:
+- a consumer may read exactly the one file the pointer names, directly in that folder;
+- it checks the file's sha256 against the pointer before acting;
+- it refuses on a missing file, a path outside that folder, or a hash mismatch, and reports it to the
+  Orchestrator;
+- no other cross-workspace read, and no write there, is allowed.
+
+**Enforcement:**
+- **Codex:** reads are not sandboxed (witness W14 records this as a known gap), so the rule and the hash
+  check hold the boundary.
+- **Claude:** sessions receive whole messages, never pointers. If a project's Claude guard restricts
+  reads and one ever needs a pointer, the briefs folder must be added to that project's
+  `read_exec_roots`, in its own reviewed opt-in.
+
+This resolves GRU19 (minion-remote-docs#1 issuecomment-6228701760). There, a brief outside M-Remote's
+containment had to be published on the issue instead.
