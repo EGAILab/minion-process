@@ -12,10 +12,13 @@ issuecomment-6228553990): the full Orchestrator-managed workflow, and every Mini
     workflow;
   - OR-2, the implementer merges after an independent exact-SHA APPROVE;
   - OR-3, review depth: one round, blocking findings only, plus one re-review;
-  - OR-4, GitHub access;
+  - OR-4, GitHub access: the Orchestrator posts the authenticated GitHub check, and the Owner decides
+    the token's scope;
   - OR-5, the onboarding pack and order, with M-Remote's lessons;
-  - OR-6, unchanged invariants.
-- Pointers to it in `routing.md`, `roles/README.md`, `WORKFLOW.md` §11.6 and §11.7, and
+  - OR-6, unchanged invariants;
+  - OR-7, Owner consent for a job: the Orchestrator decides every parameter from the contract and
+    sends one ready-made proposal, answered yes, not now or a time.
+- One-line pointers to it in `routing.md`, `roles/README.md`, `WORKFLOW.md` §11.6 and §11.7, and
   `onboarding.md`.
 - `minion_process/bootstrap/orchestrator/`, shipped as package data, forced LF (`.gitattributes`):
   - templates made from M-Remote's reviewed files (`minion-remote-docs` `4be18ceb`): the Claude

@@ -3,7 +3,7 @@
 **Referenced by:** `routing.md`, `roles/README.md`, `WORKFLOW.md` §11.6 and §11.7, `onboarding.md`.
 **Authority:** the Owner's decisions of 2026-10-17 on `EGAILab/minion-agent#231`:
 - issuecomment-6228553990: roles, merges, onboarding and review depth;
-- issuecomment-6227470172: the standing GitHub-check disposition.
+- issuecomment-6227470172: the standing GitHub-check disposition, carried to the job owner in OR-4.
 
 The contract is PROC-KIT-ORCH proposal revision 5 (issuecomment-6178363194). The first project on this
 route was M-Remote, activated on 2026-10-17. Its reviewed and installed files are the base of the pack
@@ -38,11 +38,13 @@ this kit's own route: an independent review, then an exact-SHA merge by the kit 
 ## OR-4. GitHub access
 
 - **Rule.** A worker verifies GitHub references itself before acting on a notice.
-- **Without access.** Until a worker has its own read access (an Owner-issued fine-grained token in
-  its launch environment), facts checked with an authenticated `gh` and posted on GitHub stand in for
-  its own check. The worker cites the post. A worker still stops if what it sees locally contradicts the
-  posted facts.
-- **Implementers that merge (OR-2)** need merge rights on their own repositories.
+- **Without access.** Until a worker has its own GitHub access, **the Orchestrator**, as the job's owner
+  (OR-1), checks the job's GitHub facts with an authenticated `gh`: refs, SHAs, states and files. It
+  posts them on the job's coordination issue or PR. Process-CC does not do this. The worker cites the
+  post in place of its own lookup. It still stops if what it sees locally contradicts the posted facts.
+  This carries the Owner's standing disposition (issuecomment-6227470172) over to the job owner.
+- **The worker's own access** is an Owner-issued token in its launch environment. Its scope is the
+  Owner's decision, including whether it covers merges under OR-2.
 
 ## OR-5. Onboarding a project (kit 0.4.2 pack)
 
@@ -109,3 +111,20 @@ This file never weakens:
 - the rule that no agent sends keys or approval codes.
 
 A project's own rules still decide its gate tiers and evidence standards.
+
+## OR-7. Owner consent for a job
+
+When a job needs the Owner's consent, for example a live desktop window, a device, or a capture, the
+Orchestrator decides every parameter itself from the project's contract and records:
+- duration;
+- display or device;
+- timing;
+- the steps;
+- the evidence limits.
+
+It sends the Owner **one ready-made proposal**, which the Owner can answer with **yes**, **not now**,
+or **a time**. It never asks the Owner to choose the limits.
+- **If the contract leaves a parameter open**, the Orchestrator picks the narrowest value that still
+  meets the job's goal, and states it in the proposal.
+- **A "not now" or a time** reschedules the same proposal.
+- **A changed parameter** is a new proposal.

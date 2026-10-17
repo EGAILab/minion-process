@@ -46,7 +46,9 @@ For a project activated on Gru-Maestro's Orchestrator, `orchestrator.md` adds:
 - the Orchestrator starts, hands off and closes jobs, and asks the Owner directly for Owner decisions
   on a job (OR-1);
 - the implementer merges its own PR after an independent APPROVE at the exact SHA (OR-2);
-- reviews default to one round, blocking findings only, plus one re-review (OR-3).
+- reviews default to one round, blocking findings only, plus one re-review (OR-3);
+- an Owner consent is one ready-made proposal from the Orchestrator, answered yes, not now or a time
+  (OR-7).
 
 ## Unchanged
 
