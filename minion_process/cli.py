@@ -14,6 +14,7 @@
     python -m minion_process metrics <issue> [--out <file>]
     python -m minion_process merge <code|docs|owner/repo> <pr> <sha>
     python -m minion_process comment <code|docs|owner/repo> <number> <file> [--pr]
+    python -m minion_process orch-render --root <project root> --values <rel.yaml> --out <rel dir>
 
 A patch file for `apply` defines `apply(workflow)` (mutates it; may return replacement prose) and
 `ALLOWED` (the set of top-level workflow keys it may change)."""
@@ -44,6 +45,7 @@ from .ops import (
     restore_revision,
     verified_comment,
 )
+from .orchestrator import PackError, render_pack
 from .profile import load_profile
 from .review import (
     Selection,
@@ -75,7 +77,8 @@ def _collect_reviews(gh: GitHub, repo: str, number: int) -> tuple[dict[str, Any]
 
 
 def _local(args: argparse.Namespace) -> int:
-    """The project-local commands: read-only `onboard` and `launch-plan`, and `session-record`."""
+    """The project-local commands: read-only `onboard` and `launch-plan`, `session-record`, and `orch-render`
+    (writes only a new folder inside the root)."""
     root = Path(args.root)
     try:
         if args.command == "onboard":
@@ -89,6 +92,10 @@ def _local(args: argparse.Namespace) -> int:
             manual = sum(r.status == "MANUAL" for r in results)
             print(f"{'INCOMPLETE' if todo else 'CHECKS-PASS'}: {todo} TODO, {manual} MANUAL")
             return 1 if todo else 0
+        if args.command == "orch-render":
+            for name, digest in render_pack(root, args.values, args.out):
+                print(f"{digest}  {args.out}/{name}")
+            return 0
         if args.command == "launch-plan":
             print(plan(root, args.session, args.resume, args.fresh).as_json())
             return 0
@@ -98,7 +105,7 @@ def _local(args: argparse.Namespace) -> int:
             return 0 if recorded_id else 2
         print(record(root, args.session, args.id))
         return 0
-    except (LaunchError, ManifestError) as exc:
+    except (LaunchError, ManifestError, PackError) as exc:
         print(f"ERROR: {exc}")
         return 1
 
@@ -154,6 +161,10 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
     onboard_cmd.add_argument("--from", dest="start", required=True)
     onboard_cmd.add_argument("--to", dest="end", required=True)
     onboard_cmd.add_argument("--markdown", action="store_true")
+    render_cmd = sub.add_parser("orch-render")
+    render_cmd.add_argument("--root", required=True)
+    render_cmd.add_argument("--values", required=True)
+    render_cmd.add_argument("--out", required=True)
     launch_cmd = sub.add_parser("launch-plan")
     launch_cmd.add_argument("--root", required=True)
     launch_cmd.add_argument("session")
@@ -202,7 +213,8 @@ def main(argv: list[str] | None = None, gh: GitHub | None = None) -> int:
         print("INVALID" if errors(problems) else "VALID")
         return 1 if errors(problems) else 0
 
-    if args.command in ("onboard", "launch-plan", "session-record", "session-observe"):  # offline, no `gh`
+    local = ("onboard", "orch-render", "launch-plan", "session-record", "session-observe")
+    if args.command in local:  # offline, no `gh`
         return _local(args)
 
     gh = gh or GitHub()

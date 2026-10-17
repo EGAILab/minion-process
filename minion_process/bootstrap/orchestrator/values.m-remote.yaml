@@ -1,0 +1,36 @@
+# M-Remote's values: the worked example, and the test fixture that renders the pack back into
+# M-Remote's reviewed files (minion-remote-docs 4be18ceb, process/enforcement/).
+project: Minion-Remote
+slug: minion-remote
+short: M-Remote
+claude_sessions: Review-CC
+codex_sessions: Impl-Codex
+root: 'E:\AI\Projects\OpenMinds\Minions\Minion-Remote'
+home: 'C:\Users\erick'
+temp: 'C:\Users\erick\AppData\Local\Temp'
+git_install: 'C:\Program Files\Git'
+exempt_decision: Owner decision 2026-10-16, item 3
+read_exec_roots:
+  - 'C:\Users\erick\.claude'
+  - 'C:\Users\erick\.codex'
+  - 'C:\Users\erick\.cargo'
+  - 'C:\Users\erick\.rustup'
+  - 'E:\Dev\Tools\flutter'
+  - 'C:\DEV\Android\Sdk'
+  - 'C:\Program Files\Android\jdk'
+  - 'C:\Program Files\Java\jdk-21'
+  - 'C:\Program Files\nodejs'
+  - 'C:\Program Files\Git'
+  - 'C:\Program Files\GitHub CLI'
+  - 'C:\Users\erick\AppData\Local\Programs\Herdr'
+  - 'C:\Users\erick\AppData\Local\Programs\Python\Python311'
+  - 'C:\AI\Python\Python313'
+  - 'E:\AI\Python\Python312'
+  - 'C:\Program Files\Microsoft Visual Studio\2022'
+  - 'C:\Program Files (x86)\Microsoft Visual Studio'
+  - 'C:\Program Files (x86)\Windows Kits\10'
+  - 'C:\Windows'
+repos: [minion-remote-docs, minion-remote]
+orchestrator: gru-orchestrator
+issue: EGAILab/minion-remote-docs#1
+rules_file: m-remote.rules

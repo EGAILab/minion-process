@@ -53,8 +53,12 @@ as `PY -I -m minion_process ...`.
    | `CONTROL-DENY` | C |
    | `CODEX-RELAUNCH` | D (then your effective-policy record, step 6) |
    | `CODEX-RULES` | E |
+   | `ORCH-GUARD`, `ORCH-GUARD-FILE`, `ORCH-RULES` | F |
+   | `ORCH-ACL` | G |
+   | `ORCH-TRUST`, `ORCH-LAUNCH` | H |
 
-   Post them in this order: A, B, E, C, D.
+   Post them in this order: A, B, E, C, D. For the Orchestrator opt-in (kit 0.4.2): F, H, then G after
+   the relaunched Codex session has run one sandboxed command.
 6. **Witnesses**, after the Owner reports the guard, permissions and relaunch done. Run your own rows of
    `project-scope.md` PS-7 and record each command with its result:
    - a write outside the root is refused or asked;
@@ -125,3 +129,30 @@ E. Codex sessions only: project-specific approvals live in the project, not in t
         the inventory is incomplete: go back to 1.
       - For each migrated file, also record `codex execpolicy check -r <file> <one listed command>`, as
         a syntax check.
+F. Orchestrator opt-in (kit 0.4.2, `orchestrator.md`). Install the files rendered by
+   `minion-process orch-render` from the **merged** opt-in commit, byte for byte, and post each sha256:
+   - Claude sessions: `outside-root-guard.mjs` as `<root>\.claude\hooks\outside-root-guard.mjs`, and
+     `settings.json` as `<root>\.claude\settings.json`. Create `<root>\.claude\memory` too.
+   - Codex sessions: `<rules file>` as `<root>\.codex\rules\<rules file>`.
+   Use a NON-elevated shell: an object created from an elevated shell is owned by Administrators, and
+   Codex's sandbox setup refresh then fails with WRITE_DAC denied.
+G. Codex sessions only, after step H's relaunch and one sandboxed command (Codex's setup refresh
+   rewrites the root's ACL first): from a NON-elevated PowerShell, in a kit checkout or the installed
+   package's `bootstrap\orchestrator` folder:
+   ```powershell
+   .\owner-acl.ps1 -Root <root> -Check
+   .\owner-acl.ps1 -Root <root>
+   ```
+   It stops before any change if an object is owned by Administrators, and prints the one elevated
+   repair. Post the ACLs it prints. Run `-Check` again after any Codex update.
+H. Codex sessions only:
+   1. Trust the project root in Codex. Without this, its `.codex\rules` do not load:
+      ```toml
+      [projects.'<root, lower case>']
+      trust_level = "trusted"
+      ```
+      in `~/.codex/config.toml`. It is the tool's own user-level trust record (PS-4).
+   2. Stop the Codex desktop app and its app-server, once per host. A held `node_repl.exe` makes the
+      sandbox setup refresh fail with os error 32. Stopping the app-server disconnects every running
+      `codex` TUI session; note their session ids first, so they can be resumed.
+   3. In the session's pane, after the agent has exited: `& <root>\<rendered codex-launch.ps1> -Resume <id>`.

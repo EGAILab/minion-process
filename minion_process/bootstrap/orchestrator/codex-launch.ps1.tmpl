@@ -1,0 +1,49 @@
+<#
+.SYNOPSIS
+Launch a {{PROJECT}} Codex session ({{CODEX_SESSION}}) under the Orchestrator opt-in (kit orchestrator.md, PS-3, PS-5).
+
+.DESCRIPTION
+Run by the Owner, non-elevated, in the session's own pane after the agent has exited. Rendered by
+`minion-process orch-render`; the reviewed bytes are installed, never edited in place.
+
+Before the first launch (Owner, once per host): stop the Codex desktop app and its app-server. A held
+`node_repl.exe` makes the sandbox setup refresh fail with os error 32. The last `-c` line keeps the
+bundled computer-use plugin out of this session.
+
+.EXAMPLE
+& .\codex-launch.ps1 -Resume 01a12898-e54a-7450-b79d-9bc4d8b6cec2
+& .\codex-launch.ps1
+#>
+param([string]$Resume)
+$ErrorActionPreference = 'Stop'
+$W = '{{ROOT_PS}}'
+if ((Get-Location).Path -ne $W) { Set-Location -LiteralPath $W }
+if ($Resume -and $Resume -notmatch '^[0-9A-Za-z][0-9A-Za-z-]{7,63}$') { throw "bad session id: $Resume" }
+
+# PS-3: temp and caches inside the root, never the user temp folder.
+$T = Join-Path $W '.tmp'
+foreach ($d in @('', 'cargo', 'cargo-target', 'pub-cache', 'gradle', 'pip-cache', 'npm-cache')) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $T $d) | Out-Null
+}
+$env:TEMP = $T; $env:TMP = $T; $env:TMPDIR = $T
+$env:CARGO_HOME = "$T\cargo"; $env:CARGO_TARGET_DIR = "$T\cargo-target"
+$env:PUB_CACHE = "$T\pub-cache"; $env:GRADLE_USER_HOME = "$T\gradle"
+$env:PIP_CACHE_DIR = "$T\pip-cache"; $env:npm_config_cache = "$T\npm-cache"
+
+# Git in the sandbox: the repositories are owned by the Owner's account, so sandboxed git refuses them as
+# "dubious ownership". safe.directory is honoured only in protected configuration; these pairs are
+# command scope, reach only processes started from this shell, and name exactly the project's
+# repositories. No global or system git config changes.
+{{GIT_SAFE_DIRECTORIES_PS}}
+
+$argv = @()
+if ($Resume) { $argv += @('resume', $Resume) }
+$argv += @(
+    '-C', $W, '-s', 'workspace-write', '-a', 'on-request',
+    '-c', 'sandbox_workspace_write.writable_roots=[]',
+    '-c', 'sandbox_workspace_write.network_access=true',
+    '-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true',
+    '-c', 'sandbox_workspace_write.exclude_slash_tmp=true',
+    '-c', 'plugins."unified-computer-use@openai-bundled".enabled=false'
+)
+& codex @argv

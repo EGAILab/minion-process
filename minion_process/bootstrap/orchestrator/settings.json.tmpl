@@ -1,0 +1,17 @@
+{
+  "autoMemoryDirectory": "{{ROOT_FWD}}/.claude/memory",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"{{ROOT_FWD}}/.claude/hooks/outside-root-guard.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

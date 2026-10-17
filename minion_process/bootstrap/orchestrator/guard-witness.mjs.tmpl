@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+// Witness rows for outside-root-guard.mjs (PROC-KIT-ORCH 11.6 C1-C5 plus the
+// read/execute-only exemption). Runs decide() against a sandbox laid out like real
+// workspaces under <dir>, which must be inside {{PROJECT}}/.tmp. No real file
+// outside the sandbox is touched, and no hook is installed.
+//
+// Usage: node guard-witness.mjs <sandbox dir inside {{PROJECT}}/.tmp>
+// Not yet executed: needs a granted host slot before it counts as evidence.
+
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { decide, normalize } from "./outside-root-guard.mjs";
+
+const W = path.win32;
+const base = process.argv[2];
+if (!base || !/\\{{PROJECT_RE}}\\\.tmp\\/i.test(W.resolve(base) + "\\")) {
+  console.error("sandbox dir must be inside {{PROJECT}}\\.tmp");
+  process.exit(2);
+}
+const sb = W.resolve(base);
+fs.rmSync(sb, { recursive: true, force: true });
+const root = W.join(sb, "Minions", "Minion-Remote");
+const sibling = W.join(sb, "Minions", "Minion-Agent");
+const tool = W.join(sb, "Tools", "rust");
+for (const d of [root, sibling, tool]) fs.mkdirSync(d, { recursive: true });
+fs.writeFileSync(W.join(sibling, "secret.txt"), "x");
+fs.writeFileSync(W.join(sibling, "run.cmd"), "@echo x");
+fs.writeFileSync(W.join(tool, "cargo.exe"), "");
+fs.symlinkSync(sibling, W.join(root, "link-out"), "junction");
+
+const cfg = {
+  root,
+  home: W.join(sb, "home"),
+  temp: W.join(sb, "temp"),
+  gitInstall: W.join(sb, "git"),
+  readExecRoots: [tool, W.join(sb, "home", ".claude")],
+};
+const call = (tool_name, tool_input) => decide({ tool_name, tool_input, cwd: root }, cfg).decision;
+
+const rows = [
+  ["C1 write inside root", call("Write", { file_path: W.join(root, "a.txt") }), "allow"],
+  ["C2 write to sibling workspace", call("Write", { file_path: W.join(sibling, "a.txt") }), "deny"],
+  ["C3 write through junction inside root", call("Write", { file_path: W.join(root, "link-out", "a.txt") }), "deny"],
+  ["C4 read sibling workspace", call("Read", { file_path: W.join(sibling, "secret.txt") }), "deny"],
+  ["C4 grep sibling workspace", call("Grep", { pattern: "x", path: sibling }), "deny"],
+  ["C5 run program from sibling", call("Bash", { command: `"${W.join(sibling, "run.cmd")}"` }), "deny"],
+  ["C5 PowerShell into sibling", call("PowerShell", { command: `Get-Content ${W.join(sibling, "secret.txt")}` }), "deny"],
+  ["X1 read in read/exec root", call("Read", { file_path: W.join(tool, "cargo.exe") }), "allow"],
+  ["X2 run from read/exec root", call("Bash", { command: `"${W.join(tool, "cargo.exe")}" --version` }), "allow"],
+  ["X3 write in read/exec root", call("Write", { file_path: W.join(tool, "x") }), "deny"],
+  ["X4 shell write in read/exec root", call("Bash", { command: `cp a.txt "${W.join(tool, "x")}"` }), "deny"],
+  ["X5 redirect outside root", call("Bash", { command: `echo x > "${W.join(sibling, "o.txt")}"` }), "deny"],
+  ["X6 parent traversal", call("Bash", { command: "cat ../Minion-Agent/secret.txt" }), "deny"],
+  ["X7 UNC path", call("Read", { file_path: "\\\\server\\share\\f" }), "deny"],
+  ["X8 drive-relative path", call("Read", { file_path: "C:foo" }), "deny"],
+  ["X9 unknown tool path field outside", call("SomeTool", { saveTo: W.join(sibling, "s.png") }), "deny"],
+  ["X10 malformed input", decide({}, cfg).decision, "deny"],
+  ["O1 write .claude/settings.json", call("Write", { file_path: W.join(root, ".claude", "settings.json") }), "deny"],
+  ["O2 edit .claude/settings.local.json", call("Edit", { file_path: W.join(root, ".claude", "settings.local.json") }), "deny"],
+  ["O3 write under .claude/hooks", call("Write", { file_path: W.join(root, ".claude", "hooks", "g.mjs") }), "deny"],
+  ["O4 shell redirect to settings", call("Bash", { command: "echo {} > .claude/settings.json" }), "deny"],
+  ["O5 shell copy into hooks", call("Bash", { command: "cp x.mjs .claude/hooks/outside-root-guard.mjs" }), "deny"],
+  ["O6 shell remove .claude", call("PowerShell", { command: "Remove-Item -Recurse .claude" }), "deny"],
+  ["O7 write project memory", call("Write", { file_path: W.join(root, ".claude", "memory", "m.md") }), "allow"],
+  ["O8 read settings", call("Read", { file_path: W.join(root, ".claude", "settings.json") }), "allow"],
+  ["O10 write Codex .codex/config.toml", call("Write", { file_path: W.join(root, ".codex", "config.toml") }), "deny"],
+  ["O11 shell write into .agents", call("Bash", { command: "mkdir -p .agents/skills" }), "deny"],
+  ["O12 write .tmp", call("Write", { file_path: W.join(root, ".tmp", "w.txt") }), "allow"],
+  ["O13 write under .claude/skills", call("Write", { file_path: W.join(root, ".claude", "skills", "s", "SKILL.md") }), "deny"],
+  ["O14 write .minion/kit.json", call("Write", { file_path: W.join(root, ".minion", "kit.json") }), "deny"],
+  ["O15 shell copy into .minion", call("Bash", { command: "cp x.json .minion/kit.json" }), "deny"],
+  ["O9 write global memory", call("Write", { file_path: W.join(cfg.home, ".claude", "projects", "p", "memory", "m.md") }), "deny"],
+];
+
+// Negative control: a literal-path guard (no link resolution) must allow C3.
+const literal = normalize(W.join(root, "link-out", "a.txt"), root, cfg).path;
+const literalAllowsC3 = literal.toLowerCase().startsWith(root.toLowerCase() + "\\");
+rows.push(["control: literal-path check allows C3", literalAllowsC3 ? "allow" : "deny", "allow"]);
+
+let fail = 0;
+for (const [name, got, want] of rows) {
+  const ok = got === want;
+  if (!ok) fail++;
+  console.log(`${ok ? "PASS" : "FAIL"} ${name}: got ${got}, want ${want}`);
+}
+fs.rmSync(sb, { recursive: true, force: true });
+console.log(`${rows.length - fail}/${rows.length} rows as expected`);
+process.exit(fail ? 1 : 0);

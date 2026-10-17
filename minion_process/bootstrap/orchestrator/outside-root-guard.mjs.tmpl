@@ -1,0 +1,284 @@
+#!/usr/bin/env node
+// {{PROJECT}} PreToolUse containment guard for {{CLAUDE_SESSION}} (PROC-KIT-ORCH 11.4).
+//
+// Installed by the Owner at activation as {{PROJECT}}/.claude/hooks/outside-root-guard.mjs.
+// Writes are allowed only inside the root. Reads and program execution are allowed inside
+// the root and inside the Owner-exempted read/execute roots (Owner, 2026-10-16). Every path
+// is resolved through existing links and junctions before it is compared. Anything the
+// guard cannot classify is refused (fail closed).
+//
+// Owner-only control files inside the root (kit project-scope PS-2 and PS-7):
+// <root>\.claude itself, <root>\.claude\settings*.json, everything under <root>\.claude\hooks
+// and <root>\.claude\skills, the kit's <root>\.minion, and Codex's <root>\.codex and <root>\.agents
+// (kit 0.4.2 added skills and .minion). Tool writes there are refused, so the agent cannot change
+// either agent's hooks, skills, settings, kit install or memory location. <root>\.claude\memory
+// stays writable (Owner, 2026-10-16). ~/.claude stays read and execute only.
+//
+// Known limit: Bash and PowerShell commands are parsed, not sandboxed. A command can
+// still reach paths the parser does not see (variables, generated paths, programs that
+// choose their own output location). This is policy plus hook, not an OS boundary.
+
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const W = path.win32;
+
+export const DEFAULT_CONFIG = Object.freeze({
+  root: "{{ROOT_JS}}",
+  home: "{{HOME_JS}}",
+  temp: "{{TEMP_JS}}",
+  gitInstall: "{{GIT_INSTALL_JS}}",
+  // Read and execute only; never written. {{EXEMPT_DECISION}}.
+  readExecRoots: Object.freeze([
+{{READ_EXEC_ROOTS_JS}}  ]),
+});
+
+// Tools whose path fields are only read.
+const READ_TOOLS = new Set(["Read", "Grep", "Glob", "LS"]);
+// Tools whose path fields are written.
+const WRITE_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
+const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
+// Field names that carry a filesystem path in any other tool; treated as writes.
+const PATH_KEYS = new Set([
+  "file_path", "file_paths", "notebook_path", "path", "paths", "out_dir", "root",
+  "cwd", "directory", "dir", "filename", "filePath", "output_path", "outputPath",
+  "save_path", "savePath", "saveTo", "scriptPath", "destination",
+]);
+const NULL_DEVICES = new Set(["/dev/null", "nul", "\\\\.\\nul"]);
+// A command containing any of these is treated as writing to every path it names.
+const WRITE_VERBS =
+  /(^|[\s;|&(`])(rm|rmdir|mv|cp|mkdir|touch|tee|ln|chmod|chown|truncate|dd|install|unzip|tar|curl|wget|sed\s+-i|perl\s+-i|set-content|add-content|out-file|new-item|remove-item|move-item|copy-item|rename-item|clear-content|set-item|export-\w+|expand-archive|compress-archive|del|erase|copy|move|ren|md|rd|xcopy|robocopy|mklink)(?=$|[\s;|&)])/i;
+
+// Path candidates in a command. The stop set is: whitespace " ' ` ; | & < > ( ) { } [ ] ,
+const CANDIDATE_RES = [
+  // Absolute drive paths.
+  /(?<![A-Za-z0-9_])[A-Za-z]:[\\/][^\s"'`;|&<>(){}[\],]*/g,
+  // Bare drives and drive-relative spellings (refused by normalize).
+  /(?<![A-Za-z0-9_])[A-Za-z]:(?=[\s"'`;|&<>(){}[\],]|$)/g,
+  /(?<![A-Za-z0-9_])[A-Za-z]:(?![\\/])[A-Za-z0-9_.-][^\s"'`;|&<>(){}[\],]*/g,
+  // UNC and device paths.
+  /(?<=^|[\s"'`;|&<>(){}[\],=])(?:\\\\|\/\/)[^\s"'`;|&<>(){}[\],]+/g,
+  // Home-relative.
+  /(?<=^|[\s"'`;|&<>(){}[\],=])~(?:[\\/][^\s"'`;|&<>(){}[\],]*)?(?=[\s"'`;|&<>(){}[\],]|$)/g,
+  // POSIX (Git Bash) paths.
+  /(?<=^|[\s"'`;|&<>(){}[\],=])\/[^\s"'`;|&<>(){}[\],]*/g,
+  // Anything naming .claude, .codex or .agents (relative spellings included), for the
+  // Owner-only control files.
+  /(?<=^|[\s"'`;|&<>(){}[\],=])[^\s"'`;|&<>(){}[\],=]*\.(?:claude|codex|agents)(?=[\\/\s"'`;|&<>(){}[\],]|$)[^\s"'`;|&<>(){}[\],]*/gi,
+  // Parent-directory traversal.
+  /(?<=^|[\s"'`;|&<>(){}[\],=])[^\s"'`;|&<>(){}[\],=]*\.\.(?:[\\/][^\s"'`;|&<>(){}[\],]*)?(?=[\s"'`;|&<>(){}[\],]|$)/g,
+];
+const PATHLIKE = /^([A-Za-z]:|[\\/~]|\.\.)/;
+
+function deny(reason) {
+  return { decision: "deny", reason };
+}
+const ALLOW = Object.freeze({ decision: "allow" });
+
+function isInside(child, parent) {
+  const c = child.toLowerCase();
+  const p = parent.toLowerCase().replace(/\\+$/, "");
+  return c === p || c.startsWith(p + "\\");
+}
+
+// Map one spelling to an absolute Windows path, or return a refusal reason.
+export function normalize(raw, cwd, cfg) {
+  let p = raw.trim().replace(/^["']+|["']+$/g, "");
+  if (p === "") return { error: "empty path" };
+  if (NULL_DEVICES.has(p.toLowerCase())) return { nullDevice: true };
+  if (/^(\\\\|\/\/)/.test(p)) return { error: `UNC or device path refused: ${raw}` };
+  if (/^[A-Za-z]:$/.test(p) || /^[A-Za-z]:[^\\/]/.test(p)) {
+    return { error: `drive-relative or bare-drive path refused: ${raw}` };
+  }
+  if (/^~(?=$|[\\/])/.test(p)) p = cfg.home + p.slice(1);
+  else if (/^\/[A-Za-z](?=$|\/)/.test(p)) p = `${p[1]}:\\${p.slice(3)}`;
+  else if (/^\/tmp(?=$|\/)/i.test(p)) p = cfg.temp + p.slice(4);
+  else if (/^\/(usr|mingw64|bin|etc|lib|opt|var|home|proc|dev|cmd)(?=$|\/)/i.test(p)) {
+    p = cfg.gitInstall + p;
+  } else if (p.startsWith("/")) return { error: `unmapped POSIX path refused: ${raw}` };
+  return { path: /^[A-Za-z]:[\\/]/.test(p) ? W.resolve(p) : W.resolve(cwd, p) };
+}
+
+// Resolve existing links and junctions along the path; an inspection failure refuses.
+export function realResolve(abs) {
+  let existing = abs;
+  const rest = [];
+  for (;;) {
+    try {
+      fs.lstatSync(existing);
+    } catch (e) {
+      if (e && (e.code === "ENOENT" || e.code === "ENOTDIR")) {
+        const parent = W.dirname(existing);
+        if (parent === existing) return { path: abs };
+        rest.unshift(W.basename(existing));
+        existing = parent;
+        continue;
+      }
+      return { error: `cannot inspect ${existing}: ${e && e.code}` };
+    }
+    try {
+      return { path: W.join(fs.realpathSync.native(existing), ...rest) };
+    } catch (e) {
+      return { error: `cannot resolve ${existing}: ${e && e.code}` };
+    }
+  }
+}
+
+export function classify(raw, cwd, cfg, rootReal) {
+  const n = normalize(raw, cwd, cfg);
+  if (n.error || n.nullDevice) return n;
+  const r = realResolve(n.path);
+  if (r.error) return r;
+  if (isInside(r.path, rootReal)) return { path: r.path, zone: "root" };
+  for (const ro of cfg.readExecRoots) {
+    const roReal = realResolve(ro);
+    if (!roReal.error && isInside(r.path, roReal.path)) return { path: r.path, zone: "readexec" };
+  }
+  return { path: r.path, zone: "outside" };
+}
+
+// Owner-only paths inside the root (compared after link resolution).
+export function isOwnerOnly(p, rootReal) {
+  const rel = W.relative(rootReal, p).toLowerCase();
+  if (rel === ".claude") return true;
+  if (/^\.claude\\settings[^\\]*\.json$/.test(rel)) return true;
+  for (const dir of [".claude\\hooks", ".claude\\skills", ".codex", ".agents", ".minion"]) {
+    if (rel === dir || rel.startsWith(dir + "\\")) return true;
+  }
+  return false;
+}
+
+function checkPath(raw, mode, cwd, cfg, rootReal) {
+  const c = classify(raw, cwd, cfg, rootReal);
+  if (c.error) return deny(c.error);
+  if (c.nullDevice) return ALLOW;
+  if (c.zone === "root" && mode === "write" && isOwnerOnly(c.path, rootReal)) {
+    return deny(`Owner-only control file (hooks, settings, memory location): ${c.path}`);
+  }
+  if (c.zone === "root") return ALLOW;
+  if (c.zone === "readexec" && mode === "read") return ALLOW;
+  if (c.zone === "readexec") return deny(`write refused in read/execute-only root: ${c.path}`);
+  return deny(`outside {{PROJECT}} root: ${c.path}`);
+}
+
+function expandEnv(cmd, cfg) {
+  return cmd
+    .replace(/\$env:(USERPROFILE|HOME)\b|%(USERPROFILE|HOME)%|\$\{?(HOME|USERPROFILE)\}?/gi, cfg.home)
+    .replace(/\$env:(TEMP|TMP)\b|%(TEMP|TMP)%|\$\{?(TEMP|TMP|TMPDIR)\}?/gi, cfg.temp)
+    .replace(/\$env:LOCALAPPDATA\b|%LOCALAPPDATA%|\$\{?LOCALAPPDATA\}?/gi, `${cfg.home}\\AppData\\Local`)
+    .replace(/\$env:APPDATA\b|%APPDATA%|\$\{?APPDATA\}?/gi, `${cfg.home}\\AppData\\Roaming`);
+}
+
+export function pathCandidatesInCommand(cmd, cfg) {
+  const out = new Set();
+  // A quoted string that is itself a path is one candidate, spaces included.
+  const rest = expandEnv(cmd, cfg).replace(/"([^"\n]*)"|'([^'\n]*)'/g, (m, a, b) => {
+    const s = a ?? b;
+    if (PATHLIKE.test(s)) {
+      out.add(s);
+      return " ";
+    }
+    return m;
+  });
+  for (const re of CANDIDATE_RES) for (const m of rest.matchAll(re)) out.add(m[0]);
+  return [...out];
+}
+
+export function redirectTargets(cmd, cfg) {
+  const out = [];
+  const s = expandEnv(cmd, cfg);
+  for (const m of s.matchAll(/(?<![<>=-])(?:\d|&)?>>?\s*("[^"]+"|'[^']+'|[^\s;|&)]+)/g)) {
+    const t = m[1].replace(/^["']|["']$/g, "");
+    if (!/^&?\d$/.test(t)) out.push(t);
+  }
+  return out;
+}
+
+export function decide(input, cfg = DEFAULT_CONFIG) {
+  const rootReal = realResolve(cfg.root);
+  if (rootReal.error) return deny(`root unavailable: ${rootReal.error}`);
+  if (!input || typeof input.tool_name !== "string") return deny("malformed hook input");
+  const tool = input.tool_name;
+  const ti = input.tool_input && typeof input.tool_input === "object" ? input.tool_input : {};
+  const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : cfg.root;
+
+  // Any tool that takes a command string is treated as a shell (for example Monitor).
+  if (SHELL_TOOLS.has(tool) || typeof ti.command === "string") {
+    const cmd = typeof ti.command === "string" ? ti.command : "";
+    const wd = checkPath(cwd, "write", cwd, cfg, rootReal.path);
+    if (wd.decision === "deny") return deny(`${tool} working directory: ${wd.reason}`);
+    for (const t of redirectTargets(cmd, cfg)) {
+      const r = checkPath(t, "write", cwd, cfg, rootReal.path);
+      if (r.decision === "deny") return deny(`${tool} redirection: ${r.reason}`);
+    }
+    const mode = WRITE_VERBS.test(cmd) ? "write" : "read";
+    for (const t of pathCandidatesInCommand(cmd, cfg)) {
+      const r = checkPath(t, mode, cwd, cfg, rootReal.path);
+      if (r.decision === "deny") return deny(`${tool}: ${r.reason}`);
+    }
+    return ALLOW;
+  }
+
+  const mode = READ_TOOLS.has(tool) ? "read" : "write";
+  const fields = [];
+  const walk = (v, key, depth) => {
+    if (depth > 4 || v == null) return;
+    if (typeof v === "string") {
+      if (key && PATH_KEYS.has(key)) fields.push(v);
+    } else if (Array.isArray(v)) {
+      for (const x of v) walk(x, key, depth + 1);
+    } else if (typeof v === "object") {
+      for (const [k, x] of Object.entries(v)) walk(x, k, depth + 1);
+    }
+  };
+  walk(ti, null, 0);
+  if (READ_TOOLS.has(tool) && fields.length === 0) fields.push(cwd);
+  if (tool === "Glob" && typeof ti.pattern === "string" && PATHLIKE.test(ti.pattern)) {
+    fields.push(ti.pattern.replace(/[*?[{].*$/, "") || ti.pattern);
+  }
+  for (const f of fields) {
+    const r = checkPath(f, mode, cwd, cfg, rootReal.path);
+    if (r.decision === "deny") return deny(`${tool}: ${r.reason}`);
+  }
+  return ALLOW;
+}
+
+function emit(result) {
+  if (result.decision !== "allow") {
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: `[{{SLUG}} containment] ${result.reason}`,
+        },
+      }),
+    );
+  }
+  process.exit(0);
+}
+
+async function main() {
+  let data = "";
+  for await (const chunk of process.stdin) data += chunk;
+  let input;
+  try {
+    input = JSON.parse(data);
+  } catch {
+    process.stderr.write("[{{SLUG}} containment] unparseable hook input; refused\n");
+    process.exit(2);
+  }
+  emit(decide(input));
+}
+
+const invokedDirectly =
+  typeof process.argv[1] === "string" &&
+  W.resolve(process.argv[1]).toLowerCase() === W.resolve(fileURLToPath(import.meta.url)).toLowerCase();
+if (invokedDirectly) {
+  main().catch((e) => {
+    process.stderr.write(`[{{SLUG}} containment] guard error; refused: ${e && e.message}\n`);
+    process.exit(2);
+  });
+}
